@@ -32,6 +32,15 @@ describe("http daemon", () => {
     expect(r.status).toBe(401);
   });
 
+  // Real recall path: /digest embeds one cue per fixed cue. Generous timeout
+  // covers a cold local Ollama load; with no Ollama embeds throw fast (instant).
+  it("serves /digest without a bearer token (localhost trust, same as /healthz)", async () => {
+    const r = await fetch(`${base}/digest?cwd=${encodeURIComponent(process.cwd())}`);
+    expect(r.status).toBe(200);
+    const j = await r.json();
+    expect(typeof j.digest).toBe("string");
+  }, 30_000);
+
   it("serves MCP initialize with token", async () => {
     const r = await fetch(`${base}/mcp`, {
       method: "POST",

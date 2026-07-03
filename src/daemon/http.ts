@@ -21,8 +21,10 @@ export async function startHttpDaemon(opts: DaemonOptions) {
         res.end(JSON.stringify({ ok: true, pid: process.pid, version: opts.version, ollama, db: true }));
         return;
       }
-      if (!authorized(req)) { res.writeHead(401).end(); return; }
-
+      // /digest returns a read-only recall of the user's own memory to a
+      // localhost caller — same trust level as /healthz, so it sits ABOVE the
+      // auth gate. The bearer token protects only the read-write /mcp surface,
+      // which lets the SessionStart hook take the warm path with no token read.
       if (url.pathname === "/digest" && req.method === "GET") {
         const cwd = url.searchParams.get("cwd") ?? process.cwd();
         const { buildDigestForCwd } = await import("../hooks/session-start-recall.js");
@@ -30,6 +32,8 @@ export async function startHttpDaemon(opts: DaemonOptions) {
         res.end(JSON.stringify({ digest: await buildDigestForCwd(cwd, opts.server) }));
         return;
       }
+
+      if (!authorized(req)) { res.writeHead(401).end(); return; }
 
       if (url.pathname === "/mcp") {
         const sessionId = req.headers["mcp-session-id"] as string | undefined;
