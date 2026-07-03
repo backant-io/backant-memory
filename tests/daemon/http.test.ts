@@ -4,14 +4,28 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildMemoryServer } from "../../src/server.js";
 import { startHttpDaemon } from "../../src/daemon/http.js";
+import type { Embedder } from "../../src/ollama/embeddings.js";
 
-let base: string, close: () => Promise<void>;
+let base: string, close: () => Promise<void>, kairosHome: string;
 const TOKEN = "a".repeat(64);
+
+// Deterministic fake embedder: same vector for every text, so /digest recall runs
+// entirely offline (no live Ollama, no ~11s timeout) while still exercising the
+// real recall SQL path against the per-request repo-scoped store.
+const fakeEmbedder = {
+  embed: async () => new Float32Array([0.1, 0.2, 0.3, 0.4]),
+} as unknown as Embedder;
 
 beforeAll(async () => {
   const dir = mkdtempSync(join(tmpdir(), "bam-http-"));
+  kairosHome = mkdtempSync(join(tmpdir(), "bam-http-home-"));
   const server = await buildMemoryServer({ workspaceCwd: dir, memoryDbPath: join(dir, "m.db") });
-  const d = await startHttpDaemon({ server, port: 0, token: TOKEN, version: "0.1.0-test" });
+  // /digest reads opts.server.embedder — swap in the offline fake.
+  server.embedder = fakeEmbedder;
+  const d = await startHttpDaemon({
+    server, port: 0, token: TOKEN, version: "0.1.0-test",
+    embeddingModel: "test-model", kairosHome,
+  });
   base = `http://127.0.0.1:${d.port}`;
   close = d.close;
 });
@@ -32,14 +46,22 @@ describe("http daemon", () => {
     expect(r.status).toBe(401);
   });
 
-  // Real recall path: /digest embeds one cue per fixed cue. Generous timeout
-  // covers a cold local Ollama load; with no Ollama embeds throw fast (instant).
-  it("serves /digest without a bearer token (localhost trust, same as /healthz)", async () => {
+  it("rejects /digest without a bearer token (it exposes memory content)", async () => {
     const r = await fetch(`${base}/digest?cwd=${encodeURIComponent(process.cwd())}`);
+    expect(r.status).toBe(401);
+  });
+
+  it("serves /digest with token, repo-scoped per request — empty git-less store → ''", async () => {
+    // A git-less temp dir resolves to the local-only namespace; its store (under
+    // the injected temp kairosHome) is empty, so the digest is "".
+    const gitless = mkdtempSync(join(tmpdir(), "bam-digest-cwd-"));
+    const r = await fetch(`${base}/digest?cwd=${encodeURIComponent(gitless)}`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
     expect(r.status).toBe(200);
     const j = await r.json();
-    expect(typeof j.digest).toBe("string");
-  }, 30_000);
+    expect(j.digest).toBe("");
+  });
 
   it("serves MCP initialize with token", async () => {
     const r = await fetch(`${base}/mcp`, {

@@ -1,4 +1,5 @@
 import { pathToFileURL } from "node:url";
+import { readFileSync } from "node:fs";
 import { resolvePaths } from "../paths.js";
 import { buildMemoryContext } from "../memory/context.js";
 import { recall, type RecallHit } from "../tools/memory/recall.js";
@@ -124,23 +125,26 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     deadline.unref();
 
     const cwd = process.env.CLAUDE_PROJECT_DIR ?? process.cwd();
-    const { port } = resolvePaths();
 
-    // Warm path: an always-on daemon answers /digest (open, localhost-only —
-    // same trust level as /healthz). 800ms budget; any failure → cold path.
+    // Warm path: the always-on daemon answers /digest. That route now requires
+    // the bearer token (it exposes memory content), so read the token file and
+    // send it. Any failure — unreadable token, daemon down, non-OK — falls
+    // through to the cold path. 800ms budget.
     try {
+      const paths = resolvePaths();
+      const token = readFileSync(paths.tokenPath, "utf8").trim();
       const res = await fetch(
-        `http://127.0.0.1:${port}/digest?cwd=${encodeURIComponent(cwd)}`,
-        { signal: AbortSignal.timeout(800) },
+        `http://127.0.0.1:${paths.port}/digest?cwd=${encodeURIComponent(cwd)}`,
+        { signal: AbortSignal.timeout(800), headers: { Authorization: `Bearer ${token}` } },
       );
       if (res.ok) {
         const { digest } = (await res.json()) as { digest?: string };
         if (digest) process.stdout.write(digest);
         process.exit(0);
       }
-      // Non-OK (e.g. 500) → fall through to the cold path.
+      // Non-OK (e.g. 401/500) → fall through to the cold path.
     } catch {
-      /* daemon down -> cold path */
+      /* token unreadable or daemon down -> cold path */
     }
 
     // Cold path: open the local replica directly and build the digest here.

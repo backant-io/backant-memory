@@ -1,13 +1,28 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
 import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isMemoryBackendReachable } from "../ollama/health.js";
+import { buildMemoryContext } from "../memory/context.js";
+import { readOrigin, deriveIdentity } from "../memory/repo-identity.js";
 import type { MemoryServer } from "../server.js";
+import type { MemoryDb } from "../memory/libsql-db.js";
 
-interface DaemonOptions { server: MemoryServer; port: number; token: string; version: string }
+interface DaemonOptions {
+  server: MemoryServer;
+  port: number;
+  token: string;
+  version: string;
+  /** Embedding model the per-request /digest store must be opened with. */
+  embeddingModel: string;
+  /** kairos data home for /digest stores; defaults to ~/.claude/kairos (tests inject). */
+  kairosHome?: string;
+}
 
 export async function startHttpDaemon(opts: DaemonOptions) {
   const transports = new Map<string, StreamableHTTPServerTransport>();
+  // Per-request /digest opens the repo-scoped store for the caller's cwd, cached
+  // by repo key so a repeated session-start on the same repo reuses the handle.
+  const digestDbCache = new Map<string, MemoryDb>();
 
   const authorized = (req: IncomingMessage) =>
     req.headers.authorization === `Bearer ${opts.token}`;
@@ -21,19 +36,40 @@ export async function startHttpDaemon(opts: DaemonOptions) {
         res.end(JSON.stringify({ ok: true, pid: process.pid, version: opts.version, ollama, db: true }));
         return;
       }
-      // /digest returns a read-only recall of the user's own memory to a
-      // localhost caller — same trust level as /healthz, so it sits ABOVE the
-      // auth gate. The bearer token protects only the read-write /mcp surface,
-      // which lets the SessionStart hook take the warm path with no token read.
+      if (!authorized(req)) { res.writeHead(401).end(); return; }
+
+      // /digest returns a read-only recall of the caller's repo memory. It sits
+      // BELOW the auth gate (bearer required) because it exposes memory content;
+      // the SessionStart hook reads the token file to take this warm path. Each
+      // request opens the store repo-scoped to its ?cwd — one daemon, many repos.
+      // Any failure returns {digest:""} so session start is never blocked.
       if (url.pathname === "/digest" && req.method === "GET") {
-        const cwd = url.searchParams.get("cwd") ?? process.cwd();
-        const { buildDigestForCwd } = await import("../hooks/session-start-recall.js");
+        let digest = "";
+        try {
+          const cwd = url.searchParams.get("cwd") ?? "/";
+          const origin = readOrigin(cwd);
+          const key = deriveIdentity(origin).repoKey;
+          let db = digestDbCache.get(key);
+          if (!db) {
+            const ctx = await buildMemoryContext({
+              workspaceCwd: cwd,
+              originUrl: origin,
+              embeddingModel: opts.embeddingModel,
+              forceLocal: true,
+              kairosHome: opts.kairosHome,
+            });
+            db = ctx.db;
+            digestDbCache.set(key, db);
+          }
+          const { buildDigestForCwd } = await import("../hooks/session-start-recall.js");
+          digest = await buildDigestForCwd(cwd, { db, embedder: opts.server.embedder });
+        } catch {
+          /* digest must never break session start */
+        }
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ digest: await buildDigestForCwd(cwd, opts.server) }));
+        res.end(JSON.stringify({ digest }));
         return;
       }
-
-      if (!authorized(req)) { res.writeHead(401).end(); return; }
 
       if (url.pathname === "/mcp") {
         const sessionId = req.headers["mcp-session-id"] as string | undefined;
@@ -73,6 +109,7 @@ export async function startHttpDaemon(opts: DaemonOptions) {
     port: boundPort,
     close: () => new Promise<void>((resolve) => {
       for (const t of transports.values()) t.close?.();
+      for (const db of digestDbCache.values()) void db.close();
       httpServer.close(() => resolve());
     }),
   };
