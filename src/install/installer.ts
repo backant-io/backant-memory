@@ -1,5 +1,6 @@
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { mkdirSync, readFileSync } from "node:fs";
 import { ensureToken } from "../daemon/token.js";
 import { installService, uninstallService, type ExecFn } from "../daemon/launchd.js";
@@ -15,6 +16,7 @@ export interface InstallOptions {
   launchAgentsDir?: string;
   logDir?: string;
   assetDir?: string;
+  cliPath?: string;
   port?: number;
   noHook?: boolean;
   exec?: ExecFn;
@@ -25,16 +27,15 @@ export interface InstallReport {
   url: string;
 }
 
-// installer.ts is only ever bundled INTO dist/cli.js, so argv[1] IS the cli path
-// when invoked via bin. Assets ship next to dist/ (package root), and the hook is
-// bundled to dist/hooks/. import.meta.url math is unreliable under splitting:false,
-// so anchor production paths on process.argv[1] (same trick as launchd cliPath).
-function defaultAssetDir(): string {
-  return join(dirname(process.argv[1]), "../assets");
-}
-function defaultHookPath(): string {
-  return join(dirname(process.argv[1]), "hooks/session-start-recall.js");
-}
+// In production every tsup entry lives in dist/ and inlines this module
+// (splitting:false), so bundleDir === <pkgroot>/dist regardless of entry
+// (cli.js OR postinstall.js). Never use process.argv[1]: via the global bin
+// it is the bin shim (or npm symlink), and in postinstall it is postinstall.js.
+// In dev/vitest bundleDir is src/install — fine, tests inject all paths.
+const bundleDir = dirname(fileURLToPath(import.meta.url));
+const defaultAssetDir = () => join(bundleDir, "../assets");
+const defaultHookPath = () => join(bundleDir, "hooks/session-start-recall.js");
+export const defaultCliPath = () => join(bundleDir, "cli.js");
 
 export async function runInstall(o: InstallOptions = {}): Promise<InstallReport> {
   const home = o.home ?? join(homedir(), ".claude/kairos");
@@ -45,7 +46,13 @@ export async function runInstall(o: InstallOptions = {}): Promise<InstallReport>
   const url = `http://127.0.0.1:${port}/mcp`;
 
   const token = ensureToken(join(home, "memory", ".backant-memory-token"));
-  await installService({ exec: o.exec, port, launchAgentsDir: o.launchAgentsDir, logDir: o.logDir });
+  await installService({
+    exec: o.exec,
+    port,
+    launchAgentsDir: o.launchAgentsDir,
+    logDir: o.logDir,
+    cliPath: o.cliPath ?? defaultCliPath(),
+  });
   registerMcpServer({ claudeJsonPath, url, token });
   mkdirSync(claudeDir, { recursive: true });
   upsertManagedBlock(

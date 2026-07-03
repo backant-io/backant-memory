@@ -20,17 +20,25 @@ export async function runDoctor(opts: { verifyRestart?: boolean } = {}): Promise
   checks.push(["skill installed", existsSync(join(homedir(), ".claude/skills/backant-memory/SKILL.md"))]);
 
   if (opts.verifyRestart && healthy) {
-    const pidBefore = (await (await fetch(`http://127.0.0.1:${paths.port}/healthz`)).json()).pid;
-    process.kill(pidBefore, "SIGKILL");
-    let pidAfter = pidBefore;
-    for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
-      try {
-        pidAfter = (await (await fetch(`http://127.0.0.1:${paths.port}/healthz`)).json()).pid;
-        if (pidAfter !== pidBefore) break;
-      } catch {}
+    try {
+      const pidBefore = (await (await fetch(`http://127.0.0.1:${paths.port}/healthz`)).json()).pid;
+      if (typeof pidBefore !== "number" || pidBefore <= 1) {
+        checks.push(["relaunch after SIGKILL (no valid pid)", false]);
+      } else {
+        process.kill(pidBefore, "SIGKILL");
+        let pidAfter = pidBefore;
+        for (let i = 0; i < 30; i++) {
+          await new Promise((r) => setTimeout(r, 1000));
+          try {
+            pidAfter = (await (await fetch(`http://127.0.0.1:${paths.port}/healthz`)).json()).pid;
+            if (pidAfter !== pidBefore) break;
+          } catch {}
+        }
+        checks.push(["relaunch after SIGKILL", pidAfter !== pidBefore]);
+      }
+    } catch (e) {
+      checks.push([`relaunch after SIGKILL (error: ${e})`, false]);
     }
-    checks.push(["relaunch after SIGKILL", pidAfter !== pidBefore]);
   }
 
   let ok = true;

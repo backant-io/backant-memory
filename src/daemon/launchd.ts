@@ -51,7 +51,7 @@ export function renderPlist(o: { nodePath: string; cliPath: string; port: number
 function uid(): number { return process.getuid ? process.getuid() : 501; }
 
 export async function installService(
-  opts: { exec?: ExecFn; port?: number; launchAgentsDir?: string; logDir?: string } = {}
+  opts: { exec?: ExecFn; port?: number; launchAgentsDir?: string; logDir?: string; cliPath?: string } = {}
 ): Promise<void> {
   const exec = opts.exec ?? defaultExec;
   const port = opts.port ?? 41414;
@@ -59,9 +59,10 @@ export async function installService(
   const plist = plistPath(opts.launchAgentsDir);
   mkdirSync(ld, { recursive: true });
   mkdirSync(dirname(plist), { recursive: true });
-  // launchd.ts is only ever bundled INTO dist/cli.js, so argv[1] IS the cli path
-  // when invoked via bin. This self-heals plist regeneration on upgrades.
-  const cliPath = process.argv[1];
+  // Callers must pass an explicit cliPath pointing at dist/cli.js. argv[1] is
+  // only a back-compat fallback: under the global bin it is the bin shim, and
+  // under npm postinstall it is dist/postinstall.js — both wrong for the plist.
+  const cliPath = opts.cliPath ?? process.argv[1];
   writeFileSync(plist, renderPlist({ nodePath: process.execPath, cliPath, port, logDir: ld }));
   await exec("launchctl", ["bootstrap", `gui/${uid()}`, plist]); // code 5 = already bootstrapped: fine
   await exec("launchctl", ["kickstart", "-k", `gui/${uid()}/${SERVICE_LABEL}`]);

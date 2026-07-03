@@ -77,4 +77,7 @@ program.command("doctor")
     process.exit(await runDoctor(opts));
   });
 
-program.parseAsync();
+program.parseAsync().catch((err) => {
+  console.error(String(err?.message ?? err));
+  process.exit(1);
+});
