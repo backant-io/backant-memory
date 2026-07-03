@@ -56,6 +56,40 @@ describe("launchctl wrappers", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("throws when bootstrap fails with a real error code (not 0 or 5)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bam-launchd-"));
+    const exec = vi.fn(async (_c: string, args: string[]) =>
+      args[0] === "bootstrap"
+        ? { stdout: "Bootstrap failed: 1: Operation not permitted", code: 1 }
+        : { stdout: "", code: 0 });
+    await expect(
+      installService({ exec, launchAgentsDir: dir, logDir: join(dir, "logs") })
+    ).rejects.toThrow(/bootstrap failed \(code 1\)/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("throws when kickstart fails after a successful bootstrap", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bam-launchd-"));
+    const exec = vi.fn(async (_c: string, args: string[]) =>
+      args[0] === "kickstart"
+        ? { stdout: "Could not find service", code: 3 }
+        : { stdout: "", code: 0 });
+    await expect(
+      installService({ exec, launchAgentsDir: dir, logDir: join(dir, "logs") })
+    ).rejects.toThrow(/kickstart failed \(code 3\)/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("uninstall tolerates a failing bootout (service may not be loaded)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bam-launchd-"));
+    const install = vi.fn(async () => ({ stdout: "", code: 0 }));
+    await installService({ exec: install, launchAgentsDir: dir, logDir: join(dir, "logs") });
+    const exec = vi.fn(async () => ({ stdout: "Boot-out failed: 3: No such process", code: 3 }));
+    await expect(uninstallService({ exec, launchAgentsDir: dir })).resolves.toBeUndefined();
+    expect(existsSync(join(dir, "io.backant.memory.plist"))).toBe(false);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("installService writes the plist and creates the log dir under injected dirs only", async () => {
     const dir = mkdtempSync(join(tmpdir(), "bam-launchd-"));
     const ld = join(dir, "logs");

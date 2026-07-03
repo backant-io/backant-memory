@@ -64,8 +64,16 @@ export async function installService(
   // under npm postinstall it is dist/postinstall.js — both wrong for the plist.
   const cliPath = opts.cliPath ?? process.argv[1];
   writeFileSync(plist, renderPlist({ nodePath: process.execPath, cliPath, port, logDir: ld }));
-  await exec("launchctl", ["bootstrap", `gui/${uid()}`, plist]); // code 5 = already bootstrapped: fine
-  await exec("launchctl", ["kickstart", "-k", `gui/${uid()}/${SERVICE_LABEL}`]);
+  // Acceptable bootstrap codes: 0 (loaded) and 5 (already bootstrapped). Anything
+  // else is a real failure — surface it instead of reporting a false success.
+  const boot = await exec("launchctl", ["bootstrap", `gui/${uid()}`, plist]);
+  if (boot.code !== 0 && boot.code !== 5) {
+    throw new Error(`launchctl bootstrap failed (code ${boot.code}): ${boot.stdout}`);
+  }
+  const kick = await exec("launchctl", ["kickstart", "-k", `gui/${uid()}/${SERVICE_LABEL}`]);
+  if (kick.code !== 0) {
+    throw new Error(`launchctl kickstart failed (code ${kick.code}): ${kick.stdout}`);
+  }
 }
 
 export async function uninstallService(

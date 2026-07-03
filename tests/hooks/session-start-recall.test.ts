@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -8,12 +8,21 @@ import {
   chooseCues,
   buildDigestForCwd,
 } from "../../src/hooks/session-start-recall.js";
-import { buildMemoryServer } from "../../src/server.js";
+import { openMemoryDb } from "../../src/memory/libsql-db.js";
+import { writeStm } from "../../src/tools/memory/write-stm.js";
+import type { Embedder } from "../../src/ollama/embeddings.js";
 import type { RecallHit } from "../../src/tools/memory/recall.js";
 
 function hit(p: Partial<RecallHit>): RecallHit {
   return { id: "x", content: "c", weight: 1, score: 0.5, sources: [], type: "fact", tier: "ltm", ...p };
 }
+
+// Deterministic fake embedder: identical vector for every text, so a seeded row's
+// cosine to any cue is 0 (parallel vectors) and it always surfaces via the vector
+// path. Keeps the digest tests fully offline — no live Ollama, no timeout.
+const fakeEmbedder = {
+  embed: async () => new Float32Array([0.1, 0.2, 0.3, 0.4]),
+} as unknown as Embedder;
 
 describe("buildRecallDigest", () => {
   it("renders a compact digest naming the repo", () => {
@@ -78,12 +87,27 @@ describe("chooseCues", () => {
 });
 
 describe("buildDigestForCwd", () => {
-  // Real recall path: one embed per fixed cue. Generous timeout covers a cold
-  // local Ollama load; with no Ollama each embed throws fast and this is instant.
-  it("uses the server's db and returns '' when memory is empty", async () => {
+  // Offline recall path: deterministic fake embedder, so these run without a live
+  // Ollama and assert the REAL recall SQL — not the error-swallow path that a
+  // missing embedder would take (that path returns "" for any input, seeded or not).
+  it("recalls a seeded memory and includes its content in the digest", async () => {
     const dir = mkdtempSync(join(tmpdir(), "bam-hook-"));
-    const server = await buildMemoryServer({ workspaceCwd: dir, memoryDbPath: join(dir, "m.db") });
-    expect(await buildDigestForCwd(dir, server)).toBe("");
-    await server.db.close();
-  }, 30_000);
+    const db = await openMemoryDb({ localPath: join(dir, "m.db") });
+    await writeStm({
+      db, embedder: fakeEmbedder,
+      input: { type: "fact", content: "codebase uses hexagonal architecture with ports and adapters", sources: [] },
+    });
+    const digest = await buildDigestForCwd(dir, { db, embedder: fakeEmbedder });
+    expect(digest).toContain("hexagonal architecture with ports and adapters");
+    await db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("returns '' when memory is empty", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bam-hook-"));
+    const db = await openMemoryDb({ localPath: join(dir, "m.db") });
+    expect(await buildDigestForCwd(dir, { db, embedder: fakeEmbedder })).toBe("");
+    await db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
