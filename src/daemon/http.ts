@@ -49,8 +49,12 @@ export async function startHttpDaemon(opts: DaemonOptions) {
       }
       res.writeHead(404).end();
     } catch (err) {
-      res.writeHead(500, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: String(err) }));
+      if (!res.headersSent) {
+        res.writeHead(500, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: String(err) }));
+      } else {
+        res.end();
+      }
     }
   });
 
