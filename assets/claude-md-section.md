@@ -1,6 +1,6 @@
 ## Persistent memory (backant-memory) — ALWAYS USE
 
-A vectorized long-term memory MCP server (`backant-memory`) is always running on this machine. It is repo-scoped: every project gets its own namespace automatically.
+A vectorized long-term memory MCP server (`backant-memory`) is available in this session. Memory is repo-scoped: every project gets its own namespace automatically, resolved from your git origin. A background service keeps the embedding runtime warm so recall stays fast.
 
 **Recall before you act.** Before any non-trivial decision, fix, or design on a topic that may have history, call `memory_recall` with a short cue (e.g. "auth token refresh bug"). An agent that doesn't recall is hallucinating its history. Use `memory_recall_with_edges` when relationships matter, `procedure_grounding` when starting a concrete action (fix/implement/migrate/...).
 

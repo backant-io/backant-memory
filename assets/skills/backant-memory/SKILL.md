@@ -5,7 +5,7 @@ description: Use when starting work on any task with possible history (recall fi
 
 # backant-memory — persistent vectorized memory
 
-Repo-scoped, local-first memory served by the always-on `backant-memory` daemon. Tool prefix: `mcp__backant-memory__`.
+Repo-scoped, local-first memory from the `backant-memory` MCP server (per-session, scoped to this repo). A background service keeps the local embedding runtime warm. Tool prefix: `mcp__backant-memory__`.
 
 ## Session start
 1. `procedure_sweep` once per session (marks stale runbooks).

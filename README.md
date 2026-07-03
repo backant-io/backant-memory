@@ -1,12 +1,23 @@
 # backant-memory
 
-Local-first vectorized memory for AI agents, exposed as an always-on MCP
-service. Memories are stored in repo-scoped namespaces derived from your git
-`origin` URL, so each repository gets its own isolated memory and switching
-projects switches context automatically. Recall and embeddings run **fully
-local** — a launchd-supervised daemon (label `io.backant.memory`) serves MCP
-over streamable HTTP on `127.0.0.1:41414`, and embeddings are always computed
-locally via Ollama. No memory content ever leaves your machine.
+Local-first vectorized memory for AI agents. Memories are stored in repo-scoped
+namespaces derived from your git `origin` URL, so each repository gets its own
+isolated memory and switching projects switches context automatically. Recall
+and embeddings run **fully local** — embeddings are always computed locally via
+Ollama, and no memory content ever leaves your machine.
+
+Two surfaces share one store (`~/.claude/kairos/memory/ns-<namespace>.db`):
+
+- **Claude Code** is registered over **stdio**. Each session spawns
+  `backant-memory serve`, which resolves the repo-scoped store for that session's
+  cwd — so isolation and sharing with `backant-kairos` are exact per project.
+- A launchd-supervised **daemon** (label `io.backant.memory`, `127.0.0.1:41414`)
+  stays always-on to keep Ollama warm, answer the authenticated SessionStart
+  `/digest` warm path, and expose MCP over streamable HTTP for **other agents**.
+  Note: the HTTP `/mcp` surface serves a **single global store** (repo `""`) —
+  HTTP sessions carry no cwd, so it is not repo-scoped. Roots-based HTTP scoping
+  is a tracked follow-up; until it lands, repo isolation is delivered on the
+  stdio path (Claude Code) only.
 
 ## Requirements
 
@@ -28,11 +39,14 @@ backant-memory install
 
 1. **Always-on service.** Generates `~/Library/LaunchAgents/io.backant.memory.plist`
    and bootstraps it via launchd (`KeepAlive` + `RunAtLoad`), plus a `0600`
-   bearer-token file. The daemon survives sleep, crashes, and reboot.
-2. **MCP registration (user scope).** Registers the `backant-memory` server as
-   streamable HTTP at `http://127.0.0.1:41414/mcp` with an `Authorization`
-   bearer header in `~/.claude.json`. Every Claude Code session in every repo
-   then sees the memory tools.
+   bearer-token file. The daemon survives sleep, crashes, and reboot. It keeps
+   Ollama warm and serves the authenticated `/digest` + HTTP `/mcp` surfaces.
+2. **MCP registration (user scope, stdio).** Registers the `backant-memory`
+   server in `~/.claude.json` as a **stdio** entry
+   (`command: <install>/bin/backant-memory.js`, `args: ["serve"]`). Every Claude
+   Code session in every repo then sees the memory tools, each session
+   repo-scoped to its own cwd. (Other MCP clients use the HTTP endpoint — see
+   [Other MCP clients](#other-mcp-clients).)
 3. **Global CLAUDE.md block.** Appends/updates a managed section in
    `~/.claude/CLAUDE.md` between `<!-- backant-memory:start -->` and
    `<!-- backant-memory:end -->` markers (content outside the markers is never
@@ -65,12 +79,14 @@ the daemon at login automatically.
 
 ## Other MCP clients
 
-For clients other than Claude Code, emit a ready-to-paste config snippet
-(streamable HTTP + `Authorization` header):
+`print-config` emits ready-to-paste snippets. The default (`generic`) prints
+**both**: the stdio entry (recommended, per-session repo-scoped — the same shape
+Claude Code is registered with) and the streamable-HTTP + `Authorization` entry
+for agents that only speak HTTP (which talk to the global store).
 
 ```bash
-backant-memory print-config                 # generic
-backant-memory print-config --client cursor
+backant-memory print-config                 # both stdio + http (generic)
+backant-memory print-config --client claude # stdio only
 ```
 
 ## Configuration
@@ -83,6 +99,7 @@ All settings are optional and read from the environment.
 | `BACKANT_MEMORY_PORT` | `41414` | HTTP port for the daemon. |
 | `BACKANT_MEMORY_OLLAMA_URL` | `http://127.0.0.1:11434` | Local Ollama endpoint. Falls back to `KAIROS_OLLAMA_URL`. |
 | `BACKANT_MEMORY_EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Embedding model. Falls back to `KAIROS_EMBEDDING_MODEL`. |
+| `BACKANT_MEMORY_DB` | *(unset)* | Read by `serve` only: pin a fixed store file, bypassing repo-scope resolution (stdio) and the global default (http). For tests and pinned single-store setups. |
 
 Embeddings are **always** produced locally through Ollama — there are no remote
 embedding APIs, ever.
