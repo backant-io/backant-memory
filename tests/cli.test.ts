@@ -9,6 +9,7 @@ describe("runInstall", () => {
     const root = mkdtempSync(join(tmpdir(), "inst-"));
     const exec = vi.fn(async () => ({ stdout: "", code: 0 }));
     const cliPath = "/opt/backant/dist/cli.js";
+    const binPath = "/opt/backant/bin/backant-memory.js";
     const opts = {
       home: join(root, "kairos-home"),
       claudeDir: join(root, ".claude"),
@@ -17,6 +18,7 @@ describe("runInstall", () => {
       logDir: join(root, "Logs"),
       assetDir: join(process.cwd(), "assets"),
       cliPath,
+      binPath,
       port: 45999,
       exec,
     };
@@ -27,8 +29,13 @@ describe("runInstall", () => {
     expect(existsSync(plistFile)).toBe(true);
     // plist ProgramArguments must point at the injected cli bundle, never a bin shim
     expect(readFileSync(plistFile, "utf8")).toContain(`<string>${cliPath}</string>`);
+    // Claude Code is registered over STDIO: spawn the executable bin shim with `serve`.
     const cj = JSON.parse(readFileSync(join(root, ".claude.json"), "utf8"));
-    expect(cj.mcpServers["backant-memory"].url).toBe("http://127.0.0.1:45999/mcp");
+    const entry = cj.mcpServers["backant-memory"];
+    expect(entry.type).toBe("stdio");
+    expect(entry.command.endsWith("bin/backant-memory.js")).toBe(true);
+    expect(entry.command).toBe(binPath);
+    expect(entry.args).toEqual(["serve"]);
     const claudeMd = readFileSync(join(root, ".claude/CLAUDE.md"), "utf8");
     expect(claudeMd).toContain("backant-memory:start");
     // exactly ONE managed block after two installs
