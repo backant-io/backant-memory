@@ -12,6 +12,14 @@
     "postinstall": "node dist/postinstall.js || true"
   },
   "files": ["dist", "bin", "assets", "LICENSE"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/backant-io/backant-memory.git"
+  },
+  "homepage": "https://backant.io",
+  "bugs": {
+    "url": "https://github.com/backant-io/backant-memory/issues"
+  },
   "engines": { "node": ">=20" },
   "author": "Pavel Hegler <business@hegler.tech>",
   "license": "Elastic-2.0",
