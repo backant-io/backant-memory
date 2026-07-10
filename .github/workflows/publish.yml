@@ -21,6 +21,14 @@ jobs:
         with:
           node-version: '20.x'
           cache: 'npm'
+      - name: Fail early if this version is already on npm
+        run: |
+          PKG=$(jq -r .name package.json)
+          VER=$(jq -r .version package.json)
+          if npm view "$PKG@$VER" version >/dev/null 2>&1; then
+            echo "::error::$PKG@$VER already exists on npm — bump the version in package.json before publishing."
+            exit 1
+          fi
       - name: Upgrade npm (trusted publishing needs npm >= 11.5.1)
         run: npm install -g npm@latest
       - name: Install dependencies
