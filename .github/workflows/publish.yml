@@ -30,7 +30,7 @@ jobs:
             exit 1
           fi
       - name: Upgrade npm (trusted publishing needs npm >= 11.5.1)
-        run: npm install -g npm@latest
+        run: npm install -g npm@11   # npm 12 requires node >=22; 11.5.1+ suffices for OIDC trusted publishing
       - name: Install dependencies
         run: npm ci
       - name: Test (an immutable publish must be gated by the suite)
