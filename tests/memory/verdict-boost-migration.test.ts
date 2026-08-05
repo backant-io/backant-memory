@@ -36,11 +36,12 @@ describe("verdict_boost column (shipped by Plan 0 Task A2 — Plan 2 prerequisit
     await db.close();
   });
 
-  it("is present in place on an older store that opened pre-migration (Plan 0 upgradeOlderSchema regression)", async () => {
+  it("is present in place on an older store that opened pre-migration (legacy-normalization regression)", async () => {
     tempDir = mkdtempSync(join(tmpdir(), "kairos-vb-old-"));
     const path = join(tempDir, "old.db");
     // Build a store WITHOUT verdict_boost, mimicking a pre-Plan-0 db, then open
-    // it through openMemoryDb so Plan 0's upgradeOlderSchema runs the in-place add.
+    // it through openMemoryDb so the migration runner's pre-versioning
+    // normalization does the in-place add before the baseline migration.
     const raw = createClient({ url: `file:${path}` });
     await raw.execute(
       `CREATE TABLE memory (

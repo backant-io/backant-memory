@@ -13,32 +13,32 @@ import { openMemoryDb } from "./memory/libsql-db.js";
 import { OllamaClient } from "./ollama/client.js";
 import { Embedder } from "./ollama/embeddings.js";
 
-import { writeStm } from "./tools/memory/write-stm.js";
-import { writeLtm } from "./tools/memory/write-ltm.js";
-import { recall } from "./tools/memory/recall.js";
-import { recallWithEdges } from "./tools/memory/recall-with-edges.js";
-import { recallById } from "./tools/memory/recall-by-id.js";
-import { recallByEdge } from "./tools/memory/recall-by-edge.js";
-import { patternCheck } from "./tools/memory/pattern-check.js";
-import { reviseLtm } from "./tools/memory/revise-ltm.js";
-import { reinforce } from "./tools/memory/reinforce.js";
-import { promote } from "./tools/memory/promote.js";
-import { demote } from "./tools/memory/demote.js";
-import { decaySweep } from "./tools/memory/decay-sweep.js";
-import { taskStateWrite } from "./tools/memory/task-state-write.js";
-import { taskStateRead } from "./tools/memory/task-state-read.js";
-import { writeEpisode } from "./tools/memory/write-episode.js";
-import { procedurePropose } from "./tools/memory/procedure-propose.js";
-import { procedureOutcome } from "./tools/memory/procedure-outcome.js";
-import { bumpVerdictBoost } from "./tools/memory/bump-verdict-boost.js";
-
-import { edgePropose } from "./tools/edges/propose.js";
-import { edgeApprove } from "./tools/edges/approve.js";
-import { edgeReject } from "./tools/edges/reject.js";
-import { edgesPending } from "./tools/edges/pending.js";
-
-import { procedureSweep } from "./tools/procedures/procedure-sweep.js";
-import { procedureGrounding } from "./tools/procedures/procedure-grounding.js";
+import {
+  writeStm,
+  writeLtm,
+  recall,
+  recallWithEdges,
+  recallById,
+  recallByEdge,
+  patternCheck,
+  reviseLtm,
+  reinforce,
+  promote,
+  demote,
+  decaySweep,
+  taskStateWrite,
+  taskStateRead,
+  writeEpisode,
+  procedurePropose,
+  procedureOutcome,
+  bumpVerdictBoost,
+  edgePropose,
+  edgeApprove,
+  edgeReject,
+  edgesPending,
+  procedureSweep,
+  procedureGrounding,
+} from "./tools/index.js";
 import { UNTRACKED_CYCLE_ID } from "./memory/constants.js";
 
 const { version } = JSON.parse(

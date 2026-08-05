@@ -7,6 +7,7 @@ import { taskStateRead } from "../tools/memory/task-state-read.js";
 import { Embedder } from "../ollama/embeddings.js";
 import { OllamaClient } from "../ollama/client.js";
 import type { MemoryDb } from "../memory/libsql-db.js";
+import { readLatestHandoffBrief, buildHandoffSection } from "../memory/handoff-brief.js";
 import { deriveDecisionCues, type TaskStateForCues } from "./decision-cues.js";
 
 /**
@@ -93,6 +94,9 @@ async function readActiveTaskState(db: MemoryDb): Promise<TaskStateForCues | nul
  * ../package.json relative to its own bundle, which breaks under dist/hooks/).
  * Each cue's recall is best-effort: a cue that errors (e.g. embedder
  * unavailable) is skipped so an empty/offline store yields "" rather than throwing.
+ *
+ * A handoff brief written by the daemon is prepended as the first section; a
+ * store with no `handoff_brief` rows (any standalone install) adds nothing.
  */
 export async function buildDigestForCwd(
   cwd: string,
@@ -115,7 +119,14 @@ export async function buildDigestForCwd(
       /* skip a cue that errors (e.g. embedder unavailable) */
     }
   }
-  return buildRecallDigest(server.db.repo || cwd, hits);
+  let handoffSection = "";
+  try {
+    handoffSection = buildHandoffSection(await readLatestHandoffBrief(server.db));
+  } catch {
+    /* no handoff yet — inject only the recall digest */
+  }
+  const digest = buildRecallDigest(server.db.repo || cwd, hits);
+  return [handoffSection, digest].filter(Boolean).join("\n\n");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
