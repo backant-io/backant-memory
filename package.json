@@ -3,6 +3,12 @@
   "version": "0.1.0",
   "description": "Local-first vectorized memory for AI agents — always-on MCP service",
   "type": "module",
+  "exports": {
+    ".":        { "types": "./dist/index.d.ts",        "import": "./dist/index.js" },
+    "./tools":  { "types": "./dist/tools/index.d.ts",  "import": "./dist/tools/index.js" },
+    "./docker": { "types": "./dist/docker/index.d.ts", "import": "./dist/docker/index.js" },
+    "./ollama": { "types": "./dist/ollama/index.d.ts", "import": "./dist/ollama/index.js" }
+  },
   "bin": { "backant-memory": "bin/backant-memory.js" },
   "scripts": {
     "build": "tsup",
