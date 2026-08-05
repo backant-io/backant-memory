@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createClient } from "@libsql/client";
 import { loadMigrations, runMigrations, SchemaSkewError } from "../../src/memory/migrations.js";
+import { openMemoryDb } from "../../src/memory/libsql-db.js";
 
 let tempDir: string;
 afterEach(() => { if (tempDir) rmSync(tempDir, { recursive: true, force: true }); });
@@ -54,5 +55,25 @@ describe("schema skew guard", () => {
     const ledger = await client.execute("SELECT name FROM schema_migrations");
     expect(ledger.rows.length).toBe(loadMigrations().length);
     client.close();
+  });
+
+  // The refusal only protects users if it reaches them: openMemoryDb is the one
+  // door every caller goes through, so the throw must cross that seam rather
+  // than be caught and downgraded to "opened anyway". Swallowing it there would
+  // let an old engine write a store a newer one owns — silent corruption.
+  it("openMemoryDb propagates the refusal instead of opening the store", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "bm-skew-open-"));
+    const path = join(tempDir, "mem.db");
+    const first = await openMemoryDb({ localPath: path });
+    await first.close();
+
+    const client = createClient({ url: `file:${path}` });
+    await client.execute({
+      sql: "INSERT INTO schema_migrations (name, sha256, applied_at) VALUES (?, ?, ?)",
+      args: ["999-from-the-future", "deadbeef", new Date().toISOString()],
+    });
+    client.close();
+
+    await expect(openMemoryDb({ localPath: path })).rejects.toThrow(SchemaSkewError);
   });
 });
