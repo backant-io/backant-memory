@@ -54,6 +54,24 @@ export class MigrationFailedError extends Error {
   }
 }
 
+/**
+ * The store was migrated by a NEWER engine than the one opening it. An old
+ * engine must never write a newer store — this is the schema freeze's runtime
+ * successor. Never downgraded to a warning.
+ */
+export class SchemaSkewError extends Error {
+  constructor(readonly storeVersion: string, readonly engineVersion: string, unknown: string[]) {
+    super(
+      `backant-memory: this store was migrated by a NEWER engine and cannot be opened.\n` +
+        `  store schema_version : ${storeVersion}\n` +
+        `  engine schema_version: ${engineVersion}\n` +
+        `  migrations in the store this engine does not ship: ${unknown.join(", ")}\n` +
+        `Upgrade the engine, then retry: npm install -g backant-memory@latest`
+    );
+    this.name = "SchemaSkewError";
+  }
+}
+
 const BUSY_RETRIES = 5;
 const BUSY_BACKOFF_MS = 50;
 
@@ -135,8 +153,18 @@ async function bootstrapLedger(client: Client): Promise<Set<string>> {
   return (await appliedNamesIfPresent(client)) ?? new Set<string>();
 }
 
-/** Replaced in Task 3 by the real skew guard. */
-function assertNoSchemaSkew(_applied: Set<string>, _migrations: Migration[]): void {}
+/**
+ * Refuse a store carrying migrations this engine does not ship. A store that is
+ * merely BEHIND is fine — the runner migrates it forward; only unknown names,
+ * which only a newer engine could have written, are fatal.
+ */
+function assertNoSchemaSkew(applied: Set<string>, migrations: Migration[]): void {
+  const known = new Set(migrations.map((m) => m.name));
+  const unknown = [...applied].filter((n) => !known.has(n)).sort();
+  if (unknown.length === 0) return;
+  const engineVersion = migrations.length > 0 ? migrations[migrations.length - 1].name : "(none)";
+  throw new SchemaSkewError(unknown[unknown.length - 1], engineVersion, unknown);
+}
 
 /** Replaced in Task 4 by the folded-in upgradeOlderSchema ALTER set. */
 async function normalizePreVersionedStore(_tx: Transaction): Promise<void> {}
