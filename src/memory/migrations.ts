@@ -166,8 +166,42 @@ function assertNoSchemaSkew(applied: Set<string>, migrations: Migration[]): void
   throw new SchemaSkewError(unknown[unknown.length - 1], engineVersion, unknown);
 }
 
-/** Replaced in Task 4 by the folded-in upgradeOlderSchema ALTER set. */
-async function normalizePreVersionedStore(_tx: Transaction): Promise<void> {}
+/**
+ * One-time normalization of stores created before the migration ledger existed.
+ * Adds the per-repo `repo` column and the Memory v2 additive columns so the
+ * baseline migration's `CREATE INDEX … (repo …)` can run. Runs INSIDE the
+ * migration transaction, only when the ledger is empty, only before
+ * 000-baseline — so it can never fire twice and can never half-apply.
+ *
+ * A fresh store hits every `PRAGMA table_info` with zero rows and this is a
+ * complete no-op. Moved here verbatim from libsql-db.ts's upgradeOlderSchema,
+ * which retired as a separate mechanism.
+ */
+async function normalizePreVersionedStore(tx: Transaction): Promise<void> {
+  const alters: string[] = [];
+
+  for (const table of ["memory", "memory_edges", "dream_bucket"]) {
+    const info = await tx.execute(`PRAGMA table_info(${table})`);
+    if (info.rows.length === 0) continue; // table not created yet — fresh store
+    const hasRepo = info.rows.some((r) => (r as Record<string, unknown>).name === "repo");
+    if (!hasRepo) {
+      alters.push(`ALTER TABLE ${table} ADD COLUMN repo TEXT NOT NULL DEFAULT ''`);
+    }
+  }
+
+  const memInfo = await tx.execute("PRAGMA table_info(memory)");
+  if (memInfo.rows.length > 0) {
+    const has = (name: string) =>
+      memInfo.rows.some((r) => (r as Record<string, unknown>).name === name);
+    if (!has("verdict_boost")) {
+      alters.push("ALTER TABLE memory ADD COLUMN verdict_boost REAL NOT NULL DEFAULT 0");
+    }
+    if (!has("valid_from")) alters.push("ALTER TABLE memory ADD COLUMN valid_from TEXT");
+    if (!has("valid_to")) alters.push("ALTER TABLE memory ADD COLUMN valid_to TEXT");
+  }
+
+  for (const sql of alters) await tx.execute(sql);
+}
 
 /**
  * Bring a store up to the engine's shipped migration chain.
