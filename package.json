@@ -12,6 +12,7 @@
   "bin": { "backant-memory": "bin/backant-memory.js" },
   "scripts": {
     "build": "tsup",
+    "pretest": "npm run build",
     "test": "vitest run",
     "lint": "tsc --noEmit",
     "prepublishOnly": "npm run build",

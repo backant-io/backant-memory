@@ -11,9 +11,12 @@ const DIST = join(process.cwd(), "dist");
  * Proves the SHIPPED artifact, not the source tree: the four subpath bundles
  * exist with declarations, and a bundle can open a store from its own
  * directory (migrations resolved via import.meta.url from node_modules).
- * Skips gracefully before the first build.
+ *
+ * Unguarded on purpose. `npm test` runs `pretest` → `npm run build` first, so
+ * dist/ is always freshly built here; a missing or broken build must fail this
+ * suite loudly rather than skip it into a false green.
  */
-describe.skipIf(!existsSync(join(DIST, "index.js")))("dist smoke", () => {
+describe("dist smoke", () => {
   it("emits all four entry bundles with type declarations", () => {
     for (const rel of [
       "index.js", "index.d.ts",
