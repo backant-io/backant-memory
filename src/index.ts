@@ -61,6 +61,8 @@ export type {
 
 export { digestForPaths, treeShaForPath } from "./memory/git-tree-sha.js";
 
+export { readLatestHandoffBrief, buildHandoffSection } from "./memory/handoff-brief.js";
+
 export {
   parseProcedure,
   serializeProcedure,
