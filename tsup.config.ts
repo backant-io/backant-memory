@@ -1,5 +1,5 @@
 import { defineConfig } from "tsup";
-import { copyFileSync, mkdirSync } from "node:fs";
+import { cpSync, mkdirSync } from "node:fs";
 
 export default defineConfig({
   entry: ["src/cli.ts", "src/hooks/session-start-recall.ts", "src/postinstall.ts"],
@@ -11,8 +11,13 @@ export default defineConfig({
   dts: false,
   banner: { js: "#!/usr/bin/env node" },
   onSuccess: async () => {
-    mkdirSync("dist/hooks", { recursive: true });
-    copyFileSync("src/memory/schema.sql", "dist/schema.sql");
-    copyFileSync("src/memory/schema.sql", "dist/hooks/schema.sql");
+    // migrations/ is read via `import.meta.url` from src/memory/migrations.ts.
+    // With splitting:false each entry inlines that module, so import.meta.url
+    // resolves to whichever bundle the call landed in — copy the directory
+    // adjacent to every entry that can open a store.
+    for (const dir of ["dist", "dist/hooks"]) {
+      mkdirSync(dir, { recursive: true });
+      cpSync("src/memory/migrations", `${dir}/migrations`, { recursive: true });
+    }
   },
 });

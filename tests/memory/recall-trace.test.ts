@@ -56,16 +56,18 @@ describe("additive memory columns", () => {
 });
 
 describe("additive memory columns — in-place upgrade of a v1.3 store", () => {
-  // The fresh-create test above only hits schema.sql's CREATE TABLE path. A
-  // real v1.3 store predates verdict_boost/valid_from/valid_to, so opening it
-  // must run upgradeOlderSchema's ALTER branch — the stated point of Task A2
-  // ("later layers need no second migration"). These tests seed that older
-  // shape and reopen, so the migration path itself is exercised.
+  // The fresh-create test above only hits the baseline migration's CREATE TABLE
+  // path. A real v1.3 store predates verdict_boost/valid_from/valid_to, so
+  // opening it must run the pre-versioning normalization's ALTER branch — the
+  // stated point of Task A2 ("later layers need no second migration"). These
+  // tests seed that older shape and reopen, so the migration path itself is
+  // exercised.
   const V2_COLS = ["verdict_boost", "valid_from", "valid_to"] as const;
 
   // A v1.3-shaped memory table: post per-repo scoping, but before the Memory v2
-  // additive columns. Created directly (bypassing schema.sql) so reopening it
-  // forces the in-place ADD COLUMN path rather than CREATE TABLE IF NOT EXISTS.
+  // additive columns. Created directly (bypassing the migration chain) so
+  // reopening it forces the in-place ADD COLUMN path rather than CREATE TABLE
+  // IF NOT EXISTS.
   async function seedV1_3Memory(path: string): Promise<void> {
     const c = createClient({ url: `file:${path}` });
     await c.execute(`CREATE TABLE memory (
@@ -142,10 +144,11 @@ describe("additive memory columns — in-place upgrade of a v1.3 store", () => {
 
   it("rolls back every added column if any migration ALTER fails (transactional)", async () => {
     // Spec §Error handling: the additive migration is transactional — on
-    // failure the store stays v1.3-compatible, never half-migrated. Drive the
-    // same atomic primitive upgradeOlderSchema uses (batch(..., "write")) with
-    // the real migration ALTERs plus a poison statement, and assert the table
-    // is left exactly at its pre-migration shape (no partial column adds).
+    // failure the store stays v1.3-compatible, never half-migrated. This drives
+    // the ALTERs plus a poison statement through one atomic write and asserts
+    // the table is left exactly at its pre-migration shape (no partial column
+    // adds). The production path proves the same property on the runner's own
+    // transaction — see migrations-legacy.test.ts's rollback test.
     const path = makePath();
     await seedV1_3Memory(path);
     const c = createClient({ url: `file:${path}` });
