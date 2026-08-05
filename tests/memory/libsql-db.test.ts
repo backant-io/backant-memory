@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { openMemoryDb } from "../../src/memory/libsql-db.js";
@@ -82,5 +82,23 @@ describe("schema shape", () => {
     const idx = await db.all<{ name: string }>("PRAGMA index_list(memory)");
     expect(idx.map((i) => i.name)).toContain("idx_memory_repo_tier_type");
     await db.close();
+  });
+});
+
+describe("openMemoryDb applies the migration chain", () => {
+  it("stamps the ledger and schema_version on open", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "kairos-mem-mig-"));
+    const db = await openMemoryDb({ localPath: join(tempDir, "mem.db") });
+    const ledger = await db.all<{ name: string }>("SELECT name FROM schema_migrations ORDER BY name");
+    expect(ledger.map((r) => r.name)).toContain("000-baseline");
+    const stamp = await db.get<{ value: string }>(
+      "SELECT value FROM memory_meta WHERE key='schema_version'"
+    );
+    expect(stamp?.value).toBe("000-baseline");
+    await db.close();
+  });
+
+  it("no longer ships a schema.sql artifact next to the engine", () => {
+    expect(existsSync(new URL("../../src/memory/schema.sql", import.meta.url))).toBe(false);
   });
 });
