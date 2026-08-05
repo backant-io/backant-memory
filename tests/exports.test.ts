@@ -28,7 +28,7 @@ describe("package export surface", () => {
       "ARCHIVE_FLOOR", "ARCHIVE_MIN_APPLICATIONS", "PROMOTION_THRESHOLD",
       "recallAsOf", "buildTraceResults", "sweepRecallTraces", "traceInsertStatement",
       "loadMigrations", "runMigrations", "SchemaSkewError", "MigrationFailedError",
-      "SCHEMA_VERSION_KEY", "resolvePaths",
+      "SCHEMA_VERSION_KEY", "MIGRATIONS_DIR", "resolvePaths",
       "readLatestHandoffBrief", "buildHandoffSection",
     ]) {
       expect(engine, `"." must export ${name}`).toHaveProperty(name);
@@ -46,7 +46,8 @@ describe("package export surface", () => {
   it('"./tools" exposes every tool implementation', () => {
     for (const name of [
       "writeStm", "writeLtm", "writeEpisode", "recall", "recallWithEdges", "recallById",
-      "recallByEdge", "combineScores", "attachEdgeContext", "patternCheck", "reviseLtm",
+      "recallByEdge", "combineScores", "combineScoresWithBreakdown",
+      "attachEdgeContext", "patternCheck", "reviseLtm",
       "reinforce", "promote", "demote", "decaySweep", "bumpVerdictBoost",
       "taskStateRead", "taskStateWrite", "taskStateId",
       "procedurePropose", "procedureOutcome", "procedureGrounding", "procedureSweep",
