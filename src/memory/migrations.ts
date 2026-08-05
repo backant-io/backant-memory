@@ -209,8 +209,9 @@ async function normalizePreVersionedStore(tx: Transaction): Promise<void> {
  * Algorithm (spec §2.1): bootstrap the ledger and read the applied set, refuse a
  * store the engine is too old for (see assertNoSchemaSkew), then — only if
  * behind — take a write lock (BEGIN IMMEDIATE), RE-READ the applied set under
- * the lock, apply what is still missing, stamp the ledger and memory_meta, and
- * COMMIT. Losers of the race re-read and find themselves current.
+ * the lock and re-run the refusal on it, apply what is still missing, stamp the
+ * ledger and memory_meta, and COMMIT. Losers of the race re-read and find
+ * themselves current — or, if the winner was a newer engine, refused.
  *
  * Every step retries on SQLITE_BUSY, and no step takes a lock it does not need:
  * a runner with nothing to apply never writes.
@@ -233,6 +234,11 @@ export async function runMigrations(
     try {
       tx = await client.transaction("write"); // BEGIN IMMEDIATE
       const underLock = await appliedNames(tx);
+      // The pre-lock guard read a snapshot nobody held a lock on, so a newer
+      // engine can have migrated the store in between — leaving this runner with
+      // pending=[] and about to report success on a store it must not touch.
+      // Re-checking under the lock is the only check still true when we decide.
+      assertNoSchemaSkew(underLock, migrations);
       const pending = migrations.filter((m) => !underLock.has(m.name));
       if (pending.length === 0) {
         // Lost the race: someone else applied everything. This transaction wrote
