@@ -86,6 +86,33 @@ describe("runMigrations", () => {
     client.close();
   });
 
+  it("retries the ledger bootstrap when a peer already holds the write lock", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "bm-bootstrap-"));
+    const path = join(tempDir, "mem.db");
+    const peer = createClient({ url: `file:${path}` });
+    const runner = createClient({ url: `file:${path}` });
+
+    // A concurrent runner holds a write transaction for the whole batch — so the
+    // FIRST statement we issue (the ledger bootstrap DDL, before any transaction
+    // of our own) meets SQLITE_BUSY. Race safety has to cover that statement too,
+    // otherwise the second runner dies on a lock it was always going to see.
+    const held = await peer.transaction("write");
+    await held.execute("CREATE TABLE peer_lock (x INTEGER)");
+    const release = (async () => {
+      await new Promise((r) => setTimeout(r, 80));
+      await held.rollback();
+    })();
+
+    await runMigrations(runner);
+    await release;
+
+    const ledger = await runner.execute("SELECT name FROM schema_migrations ORDER BY name");
+    expect(ledger.rows.map((r) => r.name)).toEqual(loadMigrations().map((m) => m.name));
+    held.close();
+    peer.close();
+    runner.close();
+  });
+
   it("survives concurrent runners against the same file (one applies, the rest no-op)", async () => {
     tempDir = mkdtempSync(join(tmpdir(), "bm-race-"));
     const path = join(tempDir, "mem.db");
