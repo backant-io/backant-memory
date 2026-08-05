@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createClient } from "@libsql/client";
-import { loadMigrations, runMigrations } from "../../src/memory/migrations.js";
+import {
+  loadMigrations,
+  runMigrations,
+  MigrationFailedError,
+} from "../../src/memory/migrations.js";
 
 let tempDir: string;
 afterEach(() => { if (tempDir) rmSync(tempDir, { recursive: true, force: true }); });
@@ -72,6 +76,64 @@ describe("pre-versioning store normalization", () => {
     await runMigrations(client); // second open must be a clean no-op
     const cols = (await client.execute("PRAGMA table_info(memory)")).rows.map((r) => String(r.name));
     expect(cols.filter((c) => c === "repo").length).toBe(1);
+    client.close();
+  });
+
+  it("skips normalization when the ledger is NOT empty, even on a legacy-shaped store", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "bm-legacy-gate-"));
+    const path = join(tempDir, "old.db");
+    await makePreVersionedStore(path);
+
+    // A ledger with any row in it means some engine already owns this store's
+    // shape; normalization is a pre-versioning affair and must not fire again.
+    const client = createClient({ url: `file:${path}` });
+    await client.execute(
+      "CREATE TABLE schema_migrations (name TEXT PRIMARY KEY, sha256 TEXT NOT NULL, applied_at TEXT NOT NULL)"
+    );
+    await client.execute({
+      sql: "INSERT INTO schema_migrations (name, sha256, applied_at) VALUES (?, ?, ?)",
+      args: ["000-already", "sha-already", "2026-01-01T00:00:00.000Z"],
+    });
+
+    // The injected chain leaves one migration PENDING, which is what drives the
+    // runner past its up-to-date early return and into the transaction — so
+    // control genuinely reaches the ledger-empty gate rather than skipping it.
+    await runMigrations(client, [
+      { name: "000-already", sql: "SELECT 1", sha256: "sha-already" },
+      {
+        name: "001-pending",
+        sql: "CREATE TABLE IF NOT EXISTS memory_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        sha256: "sha-pending",
+      },
+    ]);
+
+    const applied = await client.execute("SELECT name FROM schema_migrations ORDER BY name");
+    expect(applied.rows.map((r) => r.name)).toEqual(["000-already", "001-pending"]); // it ran
+    const cols = (await client.execute("PRAGMA table_info(memory)")).rows.map((r) => String(r.name));
+    expect(cols).not.toContain("repo"); // …and normalization did not
+    client.close();
+  });
+
+  it("rolls the normalization back with the batch when a later migration fails", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "bm-legacy-rollback-"));
+    const path = join(tempDir, "old.db");
+    await makePreVersionedStore(path);
+
+    const client = createClient({ url: `file:${path}` });
+    const chain = [
+      ...loadMigrations(),
+      { name: "001-bad", sql: "THIS IS NOT SQL;", sha256: "sha-bad" },
+    ];
+    await expect(runMigrations(client, chain)).rejects.toThrow(MigrationFailedError);
+
+    // The ALTERs run on the migration's own transaction, so the failure took
+    // them down with it. Run them on the client before BEGIN — the shape the
+    // retired upgradeOlderSchema had — and this store would keep a `repo`
+    // column that no ledger row accounts for.
+    const cols = (await client.execute("PRAGMA table_info(memory)")).rows.map((r) => String(r.name));
+    expect(cols).not.toContain("repo");
+    const ledger = await client.execute("SELECT name FROM schema_migrations");
+    expect(ledger.rows.length).toBe(0);
     client.close();
   });
 });
