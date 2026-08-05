@@ -86,31 +86,50 @@ describe("runMigrations", () => {
     client.close();
   });
 
-  it("retries the ledger bootstrap when a peer already holds the write lock", async () => {
+  it("waits out a peer that holds the write lock through its whole batch", async () => {
     tempDir = mkdtempSync(join(tmpdir(), "bm-bootstrap-"));
     const path = join(tempDir, "mem.db");
     const peer = createClient({ url: `file:${path}` });
     const runner = createClient({ url: `file:${path}` });
+    const chain = loadMigrations();
 
-    // A concurrent runner holds a write transaction for the whole batch — so the
-    // FIRST statement we issue (the ledger bootstrap DDL, before any transaction
-    // of our own) meets SQLITE_BUSY. Race safety has to cover that statement too,
-    // otherwise the second runner dies on a lock it was always going to see.
+    // A peer runner is mid-batch on an unmigrated store: it holds the write lock
+    // from its first statement to its commit. A second runner starting inside
+    // that window must NOT die on the lock — its very first act, creating the
+    // ledger, is a write that the peer is blocking. Waiting is the whole point:
+    // when the peer commits, the store is current and we have nothing to do.
     const held = await peer.transaction("write");
-    await held.execute("CREATE TABLE peer_lock (x INTEGER)");
+    await held.execute(
+      "CREATE TABLE schema_migrations (name TEXT PRIMARY KEY, sha256 TEXT NOT NULL, applied_at TEXT NOT NULL)"
+    );
+    for (const m of chain) {
+      await held.executeMultiple(m.sql);
+      await held.execute({
+        sql: "INSERT INTO schema_migrations (name, sha256, applied_at) VALUES (?, ?, ?)",
+        args: [m.name, m.sha256, new Date().toISOString()],
+      });
+    }
+    await held.execute({
+      sql: "INSERT INTO memory_meta (key, value) VALUES ('schema_version', ?)",
+      args: [chain[chain.length - 1].name],
+    });
     const release = (async () => {
       await new Promise((r) => setTimeout(r, 80));
-      await held.rollback();
+      await held.commit();
     })();
 
     await runMigrations(runner);
     await release;
-
-    const ledger = await runner.execute("SELECT name FROM schema_migrations ORDER BY name");
-    expect(ledger.rows.map((r) => r.name)).toEqual(loadMigrations().map((m) => m.name));
     held.close();
+
+    // Exactly one ledger row per migration: the late runner waited, then found
+    // itself current — it did not re-apply the chain on top of the peer's work.
+    const observer = createClient({ url: `file:${path}` });
+    const ledger = await observer.execute("SELECT name FROM schema_migrations ORDER BY name");
+    expect(ledger.rows.map((r) => r.name)).toEqual(chain.map((m) => m.name));
     peer.close();
     runner.close();
+    observer.close();
   });
 
   it("survives concurrent runners against the same file (one applies, the rest no-op)", async () => {
