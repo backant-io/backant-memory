@@ -35,6 +35,14 @@ describe("package export surface", () => {
     }
   });
 
+  it('"." keeps the aliased procedure shouldArchive a distinct binding', () => {
+    // decay.ts and procedure-content.ts both export `shouldArchive`; the barrel
+    // aliases the second. If the alias ever collapsed onto decay's binding, a
+    // caller asking about procedure health would silently get memory-weight
+    // archival instead — same name, different question, no error.
+    expect(engine.shouldArchive).not.toBe(engine.shouldArchiveProcedure);
+  });
+
   it('"./tools" exposes every tool implementation', () => {
     for (const name of [
       "writeStm", "writeLtm", "writeEpisode", "recall", "recallWithEdges", "recallById",
