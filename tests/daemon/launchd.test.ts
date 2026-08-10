@@ -183,6 +183,19 @@ describe("parsePlistProgramPath", () => {
     );
   });
 
+  it("reports slot 1 verbatim even when it is not a path", () => {
+    // The parser stays a parser: wrapper shapes like ["/usr/bin/env","node",cli]
+    // and flag shapes like [node,"--enable-source-maps",cli] really do put a
+    // non-path in slot 1, and shouldRewritePlist is what refuses to treat that
+    // as proof of ownership.
+    const args = (xs: string[]) =>
+      `<key>ProgramArguments</key><array>${xs.map((x) => `<string>${x}</string>`).join("")}</array>`;
+    expect(parsePlistProgramPath(args(["/usr/bin/env", "node", "/g/dist/cli.js"]))).toBe("node");
+    expect(
+      parsePlistProgramPath(args(["/bin/node", "--enable-source-maps", "/g/dist/cli.js"]))
+    ).toBe("--enable-source-maps");
+  });
+
   it("returns undefined for a plist it cannot understand", () => {
     // An unreadable plist must not be mistaken for one pointing at us — the
     // caller has to fall back to the ownership check, not to a rewrite.
@@ -199,18 +212,20 @@ describe("parsePlistProgramPath", () => {
 describe("shouldRewritePlist", () => {
   const OURS = "/repo/.worktrees/wt/node_modules/backant-memory";
   const GLOBAL = "/opt/homebrew/lib/node_modules/backant-memory";
+  // A global install of some *other* package that bundles us as a dependency.
+  const NESTED_GLOBAL = "/opt/homebrew/lib/node_modules/backant-kairos/node_modules/backant-memory";
   const foreign = `${GLOBAL}/dist/cli.js`;
   const own = `${OURS}/dist/cli.js`;
 
-  it("rewrites on a global install even when the plist points elsewhere", () => {
+  it("rewrites on a top-level global install even when the plist points elsewhere", () => {
     // A global install owns the machine's service: taking over a plist left by
     // a previous prefix is the intended upgrade path.
     expect(
       shouldRewritePlist({
         plistExists: true,
         isGlobalInstall: true,
-        plistProgramPath: foreign,
-        installPrefix: OURS,
+        plistProgramPath: "/usr/local/lib/node_modules/backant-memory/dist/cli.js",
+        installPrefix: GLOBAL,
       })
     ).toBe(true);
   });
@@ -294,6 +309,55 @@ describe("shouldRewritePlist", () => {
         isGlobalInstall: false,
         plistProgramPath: `${OURS}/dist/../dist/cli.js`,
         installPrefix: `${OURS}/`,
+      })
+    ).toBe(true);
+  });
+
+  it("never accepts a relative program path, even when cwd is the install prefix", () => {
+    // npm runs postinstall with cwd === the package root === installPrefix
+    // (verified), so resolving a bare token like "node" lands *inside* the
+    // prefix and would forge ownership. Real plists seen in the wild:
+    // ["/usr/bin/env","node",<foreign>] and [node,"--enable-source-maps",<foreign>]
+    // both put a non-path in slot 1. Ownership must be provable from the plist
+    // alone, so anything not absolute proves nothing.
+    for (const rel of ["node", "--enable-source-maps", "dist/cli.js", "./dist/cli.js"]) {
+      expect(
+        shouldRewritePlist({
+          plistExists: true,
+          isGlobalInstall: false,
+          plistProgramPath: rel,
+          installPrefix: process.cwd(),
+        }),
+        `relative program path ${JSON.stringify(rel)} must not establish ownership`
+      ).toBe(false);
+    }
+  });
+
+  it("does not let a nested dependency of a global install claim the service", () => {
+    // `npm i -g backant-kairos` runs OUR postinstall with npm_config_global=true
+    // and installs us at <gprefix>/lib/node_modules/backant-kairos/node_modules/
+    // backant-memory (verified). Claiming the plist there means a later
+    // `npm uninstall -g backant-kairos` leaves KeepAlive respawning a deleted
+    // path — the standalone global install that owns the service today must win.
+    expect(
+      shouldRewritePlist({
+        plistExists: true,
+        isGlobalInstall: true,
+        plistProgramPath: foreign,
+        installPrefix: NESTED_GLOBAL,
+      })
+    ).toBe(false);
+  });
+
+  it("still lets a nested global install refresh a plist it already owns", () => {
+    // Ownership by containment is unaffected by how the tree was installed, so
+    // a service genuinely running from the nested copy still gets its upgrade.
+    expect(
+      shouldRewritePlist({
+        plistExists: true,
+        isGlobalInstall: true,
+        plistProgramPath: `${NESTED_GLOBAL}/dist/cli.js`,
+        installPrefix: NESTED_GLOBAL,
       })
     ).toBe(true);
   });
