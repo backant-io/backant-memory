@@ -9,6 +9,9 @@ import {
   serviceStatus,
   plistPath,
   logDir,
+  isGlobalNpmInstall,
+  parsePlistProgramPath,
+  shouldRewritePlist,
 } from "../../src/daemon/launchd.js";
 
 describe("renderPlist", () => {
@@ -130,5 +133,168 @@ describe("launchctl wrappers", () => {
     expect(await serviceStatus({ exec: loaded })).toBe("loaded");
     const missing = vi.fn(async () => ({ stdout: "", code: 113 }));
     expect(await serviceStatus({ exec: missing })).toBe("not-installed");
+  });
+});
+
+/**
+ * Guard for the postinstall plist rewrite (issue #3). A dependency install must
+ * never repoint the machine's one launchd service at its own node_modules: when
+ * that tree is a git worktree it gets deleted, and KeepAlive then respawns a
+ * missing file forever. Only the owner of the service may rewrite it.
+ */
+describe("isGlobalNpmInstall", () => {
+  // Semantics verified empirically against npm 10.9.9 and npm 11.12.1: `-g`
+  // exports npm_config_global="true"; a dependency install exports the key not
+  // at all (npm omits configs left at their default), so presence-vs-absence —
+  // not a truthiness check on a "false" string — is what distinguishes them.
+  it("is true only for a global install (npm_config_global=true)", () => {
+    expect(isGlobalNpmInstall({ npm_config_global: "true" })).toBe(true);
+  });
+
+  it("is false when npm_config_global is absent — that is a dependency install", () => {
+    expect(isGlobalNpmInstall({})).toBe(false);
+    expect(isGlobalNpmInstall({ npm_config_local_prefix: "/repo" })).toBe(false);
+  });
+
+  it("is false for an explicitly non-global value, not merely a missing key", () => {
+    expect(isGlobalNpmInstall({ npm_config_global: "false" })).toBe(false);
+    expect(isGlobalNpmInstall({ npm_config_global: "" })).toBe(false);
+  });
+
+  // `npm install --location=global` is the other spelling of `-g`. It exports
+  // npm_config_location="global" and leaves npm_config_global unset (verified
+  // on npm 10.9.9 and 11.12.1), so global-ness needs both keys.
+  it("is true for the --location=global spelling of a global install", () => {
+    expect(isGlobalNpmInstall({ npm_config_location: "global" })).toBe(true);
+    expect(isGlobalNpmInstall({ npm_config_location: "user" })).toBe(false);
+  });
+});
+
+describe("parsePlistProgramPath", () => {
+  it("reads back the cli path that renderPlist wrote", () => {
+    const xml = renderPlist({
+      nodePath: "/opt/homebrew/bin/node",
+      cliPath: "/opt/homebrew/lib/node_modules/backant-memory/dist/cli.js",
+      port: 41414,
+      logDir: "/logs",
+    });
+    expect(parsePlistProgramPath(xml)).toBe(
+      "/opt/homebrew/lib/node_modules/backant-memory/dist/cli.js"
+    );
+  });
+
+  it("returns undefined for a plist it cannot understand", () => {
+    // An unreadable plist must not be mistaken for one pointing at us — the
+    // caller has to fall back to the ownership check, not to a rewrite.
+    expect(parsePlistProgramPath("not a plist")).toBeUndefined();
+    expect(parsePlistProgramPath("<plist><dict></dict></plist>")).toBeUndefined();
+    expect(
+      parsePlistProgramPath(
+        "<key>ProgramArguments</key><array><string>/bin/node</string></array>"
+      )
+    ).toBeUndefined();
+  });
+});
+
+describe("shouldRewritePlist", () => {
+  const OURS = "/repo/.worktrees/wt/node_modules/backant-memory";
+  const GLOBAL = "/opt/homebrew/lib/node_modules/backant-memory";
+  const foreign = `${GLOBAL}/dist/cli.js`;
+  const own = `${OURS}/dist/cli.js`;
+
+  it("rewrites on a global install even when the plist points elsewhere", () => {
+    // A global install owns the machine's service: taking over a plist left by
+    // a previous prefix is the intended upgrade path.
+    expect(
+      shouldRewritePlist({
+        plistExists: true,
+        isGlobalInstall: true,
+        plistProgramPath: foreign,
+        installPrefix: OURS,
+      })
+    ).toBe(true);
+  });
+
+  it("rewrites on a global install that is refreshing its own plist", () => {
+    expect(
+      shouldRewritePlist({
+        plistExists: true,
+        isGlobalInstall: true,
+        plistProgramPath: `${GLOBAL}/dist/cli.js`,
+        installPrefix: GLOBAL,
+      })
+    ).toBe(true);
+  });
+
+  it("leaves a foreign plist alone on a dependency install", () => {
+    // Issue #3 verbatim: `npm install` inside a kairos worktree must not
+    // repoint the live service at the worktree's node_modules.
+    expect(
+      shouldRewritePlist({
+        plistExists: true,
+        isGlobalInstall: false,
+        plistProgramPath: foreign,
+        installPrefix: OURS,
+      })
+    ).toBe(false);
+  });
+
+  it("rewrites on a dependency install that already owns the plist", () => {
+    // Re-installing over yourself only refreshes what you already run, so the
+    // upgrade path for a dependency-hosted service still works.
+    expect(
+      shouldRewritePlist({
+        plistExists: true,
+        isGlobalInstall: false,
+        plistProgramPath: own,
+        installPrefix: OURS,
+      })
+    ).toBe(true);
+  });
+
+  it("does nothing when no plist exists, for either install type", () => {
+    // Unchanged pre-0.2.1 behavior: postinstall never *creates* the service —
+    // `backant-memory install` does. First install stays a no-op.
+    for (const isGlobalInstall of [true, false]) {
+      expect(
+        shouldRewritePlist({ plistExists: false, isGlobalInstall, installPrefix: OURS })
+      ).toBe(false);
+    }
+  });
+
+  it("does not treat a sibling directory as its own prefix", () => {
+    // `/…/backant-memory-old` shares a string prefix with `/…/backant-memory`;
+    // ownership is a path-containment question, not a startsWith question.
+    expect(
+      shouldRewritePlist({
+        plistExists: true,
+        isGlobalInstall: false,
+        plistProgramPath: `${OURS}-old/dist/cli.js`,
+        installPrefix: OURS,
+      })
+    ).toBe(false);
+  });
+
+  it("leaves an unparseable plist alone on a dependency install", () => {
+    // Unknown owner + no mandate to take over = hands off.
+    expect(
+      shouldRewritePlist({
+        plistExists: true,
+        isGlobalInstall: false,
+        plistProgramPath: undefined,
+        installPrefix: OURS,
+      })
+    ).toBe(false);
+  });
+
+  it("normalizes both sides before comparing", () => {
+    expect(
+      shouldRewritePlist({
+        plistExists: true,
+        isGlobalInstall: false,
+        plistProgramPath: `${OURS}/dist/../dist/cli.js`,
+        installPrefix: `${OURS}/`,
+      })
+    ).toBe(true);
   });
 });
