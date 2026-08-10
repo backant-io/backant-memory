@@ -78,9 +78,33 @@ export function parsePlistProgramPath(xml: string): string | undefined {
 }
 
 function isInsidePrefix(prefix: string, target: string): boolean {
+  // A relative target proves nothing: npm runs postinstall with cwd set to the
+  // package root — which IS installPrefix — so resolve() would land any bare
+  // token ("node", "--enable-source-maps", …) inside the prefix and forge
+  // ownership. Rejected here rather than in parsePlistProgramPath so the parser
+  // keeps reporting the plist faithfully and every caller gets the guarantee.
+  if (!isAbsolute(target)) return false;
   // Path containment, not string prefixing: `/x/pkg-old` is not inside `/x/pkg`.
   const rel = relative(resolve(prefix), resolve(target));
   return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+/**
+ * npm exports npm_config_global=true for the *dependencies* of a global install
+ * too, so the flag alone would let `npm i -g backant-kairos` seize the plist
+ * from the standalone global backant-memory that owns it — and uninstalling
+ * kairos would then leave KeepAlive respawning a deleted path. Only a top-level
+ * global install may claim ownership.
+ *
+ * Detected by counting `node_modules` segments (top-level global installs land
+ * at <prefix>/lib/node_modules/<name>, nested ones gain a second segment —
+ * both verified against npm 11.12.1) rather than by comparing against
+ * npm_config_global_prefix: this needs no env var, assumes no `lib/node_modules`
+ * layout (Windows global installs have no `lib`), and needs no realpath
+ * normalisation between two independently derived paths.
+ */
+function isTopLevelInstall(installPrefix: string): boolean {
+  return installPrefix.split(/[\\/]+/).filter((s) => s === "node_modules").length <= 1;
 }
 
 export function shouldRewritePlist(o: {
@@ -91,8 +115,9 @@ export function shouldRewritePlist(o: {
 }): boolean {
   // postinstall never creates the service — `backant-memory install` does.
   if (!o.plistExists) return false;
-  // A global install owns the machine's service, whatever it points at today.
-  if (o.isGlobalInstall) return true;
+  // A top-level global install owns the machine's service, whatever it points
+  // at today; a copy bundled inside someone else's global install does not.
+  if (o.isGlobalInstall && isTopLevelInstall(o.installPrefix)) return true;
   // Otherwise only a self-refresh: the plist already runs files from this tree.
   return o.plistProgramPath !== undefined && isInsidePrefix(o.installPrefix, o.plistProgramPath);
 }

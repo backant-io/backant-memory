@@ -32,8 +32,10 @@ try {
       (e) => process.stderr.write(`[backant-memory] service refresh failed: ${e}\n`)
     );
   } else if (existing !== undefined) {
+    // Covers every skip reason: a dependency install, a copy nested inside
+    // another package's global install, and a plist we cannot read.
     process.stderr.write(
-      "[backant-memory] existing launchd service left untouched (not a global install and not ours)\n"
+      "[backant-memory] existing launchd service left untouched (this install does not own it)\n"
     );
   }
 } catch (e) {
