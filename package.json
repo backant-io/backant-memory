@@ -1,6 +1,6 @@
 {
   "name": "backant-memory",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local-first vectorized memory for AI agents — always-on MCP service",
   "type": "module",
   "exports": {
