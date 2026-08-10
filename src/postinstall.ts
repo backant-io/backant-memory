@@ -1,7 +1,13 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { plistPath, installService } from "./daemon/launchd.js";
+import {
+  plistPath,
+  installService,
+  isGlobalNpmInstall,
+  parsePlistProgramPath,
+  shouldRewritePlist,
+} from "./daemon/launchd.js";
 
 // This entry is bundled to dist/postinstall.js, so bundleDir === <pkgroot>/dist
 // and the plist must point at dist/cli.js — NOT argv[1], which here would be
@@ -9,12 +15,25 @@ import { plistPath, installService } from "./daemon/launchd.js";
 const bundleDir = dirname(fileURLToPath(import.meta.url));
 
 // Never fail `npm install`: only refresh the launchd service when it was already
-// installed (upgrade path, spec §8a), and swallow every error to stderr.
+// installed (upgrade path, spec §8a) AND this install owns it (issue #3), and
+// swallow every error to stderr.
 try {
-  if (existsSync(plistPath())) {
+  const plist = plistPath();
+  const existing = existsSync(plist) ? readFileSync(plist, "utf8") : undefined;
+  const rewrite = shouldRewritePlist({
+    plistExists: existing !== undefined,
+    isGlobalInstall: isGlobalNpmInstall(process.env),
+    plistProgramPath: existing === undefined ? undefined : parsePlistProgramPath(existing),
+    installPrefix: dirname(bundleDir),
+  });
+  if (rewrite) {
     installService({ cliPath: join(bundleDir, "cli.js") }).then(
       () => process.stderr.write("[backant-memory] service refreshed after upgrade\n"),
       (e) => process.stderr.write(`[backant-memory] service refresh failed: ${e}\n`)
+    );
+  } else if (existing !== undefined) {
+    process.stderr.write(
+      "[backant-memory] existing launchd service left untouched (not a global install and not ours)\n"
     );
   }
 } catch (e) {

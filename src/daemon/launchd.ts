@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, isAbsolute, relative, resolve } from "node:path";
 
 export const SERVICE_LABEL = "io.backant.memory";
 export type ExecFn = (cmd: string, args: string[]) => Promise<{ stdout: string; code: number }>;
@@ -46,6 +46,55 @@ export function renderPlist(o: { nodePath: string; cliPath: string; port: number
 </dict>
 </plist>
 `;
+}
+
+/**
+ * Ownership rules for the one launchd plist on the machine (issue #3).
+ *
+ * postinstall runs for every install of this package, including as a
+ * dependency of something else. Rewriting the plist unconditionally repoints
+ * the live service at whatever tree is being installed — and when that tree is
+ * a git worktree's node_modules it later disappears, leaving KeepAlive to
+ * respawn a missing file forever. So only the service's owner may rewrite it.
+ */
+
+/**
+ * Semantics verified against npm 10.9.9 and 11.12.1: `-g` exports
+ * npm_config_global="true"; `--location=global` exports
+ * npm_config_location="global" and leaves npm_config_global unset; a
+ * dependency install exports neither key (npm omits configs left at default).
+ */
+export function isGlobalNpmInstall(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.npm_config_global === "true" || env.npm_config_location === "global";
+}
+
+/** The script path an existing plist runs, or undefined if it does not parse. */
+export function parsePlistProgramPath(xml: string): string | undefined {
+  const block = /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(xml);
+  if (!block) return undefined;
+  // renderPlist emits [nodePath, cliPath, "serve", …] — the script is second.
+  const args = [...block[1].matchAll(/<string>([\s\S]*?)<\/string>/g)].map((m) => m[1].trim());
+  return args.length > 1 ? args[1] : undefined;
+}
+
+function isInsidePrefix(prefix: string, target: string): boolean {
+  // Path containment, not string prefixing: `/x/pkg-old` is not inside `/x/pkg`.
+  const rel = relative(resolve(prefix), resolve(target));
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
+export function shouldRewritePlist(o: {
+  plistExists: boolean;
+  isGlobalInstall: boolean;
+  plistProgramPath?: string;
+  installPrefix: string;
+}): boolean {
+  // postinstall never creates the service — `backant-memory install` does.
+  if (!o.plistExists) return false;
+  // A global install owns the machine's service, whatever it points at today.
+  if (o.isGlobalInstall) return true;
+  // Otherwise only a self-refresh: the plist already runs files from this tree.
+  return o.plistProgramPath !== undefined && isInsidePrefix(o.installPrefix, o.plistProgramPath);
 }
 
 function uid(): number { return process.getuid ? process.getuid() : 501; }
