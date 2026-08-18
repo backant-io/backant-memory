@@ -5,6 +5,8 @@ export default defineConfig({
   entry: [
     "src/cli.ts",
     "src/hooks/session-start-recall.ts",
+    "src/hooks/prompt-recall.ts",
+    "src/hooks/session-summary.ts",
     "src/postinstall.ts",
     // Library surface consumed by backant-kairos (package.json "exports").
     "src/index.ts",

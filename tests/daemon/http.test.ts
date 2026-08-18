@@ -63,6 +63,32 @@ describe("http daemon", () => {
     expect(j.digest).toBe("");
   });
 
+  it("rejects /recall without a bearer token", async () => {
+    const r = await fetch(`${base}/recall?cwd=${encodeURIComponent(process.cwd())}&cue=x`);
+    expect(r.status).toBe(401);
+  });
+
+  it("serves /recall with token: repo-scoped hits for a cue, hits carry timestamps", async () => {
+    // WHY: this is the warm path the UserPromptSubmit hook depends on; the hook
+    // renders ages from last_reinforced, so the field must survive the wire.
+    const gitless = mkdtempSync(join(tmpdir(), "bam-recall-cwd-"));
+    const { buildMemoryContext } = await import("../../src/memory/context.js");
+    const { writeStm } = await import("../../src/tools/memory/write-stm.js");
+    const ctx = await buildMemoryContext({ workspaceCwd: gitless, embeddingModel: "test-model", forceLocal: true, kairosHome });
+    await writeStm({ db: ctx.db, embedder: fakeEmbedder, input: { type: "observation", content: "use pnpm not npm here", sources: ["t"] } });
+    await ctx.db.close();
+    const r = await fetch(`${base}/recall?cwd=${encodeURIComponent(gitless)}&cue=${encodeURIComponent("pnpm npm")}&k=3`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    expect(r.status).toBe(200);
+    const j = await r.json();
+    expect(Array.isArray(j.hits)).toBe(true);
+    expect(j.hits.length).toBe(1);
+    expect(j.hits[0].content).toBe("use pnpm not npm here");
+    expect(typeof j.hits[0].last_reinforced).toBe("string");
+    expect(typeof j.hits[0].created).toBe("string");
+  });
+
   it("serves MCP initialize with token", async () => {
     const r = await fetch(`${base}/mcp`, {
       method: "POST",

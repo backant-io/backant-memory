@@ -36,6 +36,9 @@ describe("runInstall", () => {
     expect(entry.command.endsWith("bin/backant-memory.js")).toBe(true);
     expect(entry.command).toBe(binPath);
     expect(entry.args).toEqual(["serve"]);
+    // Pinned out of MCP tool-search deferral: otherwise the tools are invisible
+    // until the model happens to ToolSearch for them.
+    expect(entry.alwaysLoad).toBe(true);
     const claudeMd = readFileSync(join(root, ".claude/CLAUDE.md"), "utf8");
     expect(claudeMd).toContain("backant-memory:start");
     // exactly ONE managed block after two installs
@@ -48,6 +51,11 @@ describe("runInstall", () => {
       .flatMap((entry) => entry.hooks ?? [])
       .filter((h) => String(h.command ?? "").includes("session-start-recall"));
     expect(hookCmds.length).toBe(1);
+    // Mid-session and end-of-session hooks are wired too (once each).
+    expect(JSON.stringify(st.hooks.UserPromptSubmit).split("prompt-recall").length).toBe(2);
+    expect(JSON.stringify(st.hooks.PreCompact).split("session-summary").length).toBe(2);
+    expect(JSON.stringify(st.hooks.SessionEnd).split("session-summary").length).toBe(2);
+    expect(st.hooks.SessionEnd[0].hooks[0].timeout).toBe(20);
     expect(exec).toHaveBeenCalled(); // launchctl bootstrap + kickstart
   });
 });

@@ -19,6 +19,9 @@ export interface ScoredHit {
   tier: string;
   sources: string[];
   score: number;
+  /** ISO timestamps, carried so callers can render an age. */
+  created: string;
+  last_reinforced: string;
   breakdown: ScoreBreakdown;
 }
 

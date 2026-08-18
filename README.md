@@ -54,9 +54,21 @@ backant-memory install
    and `memory_write_stm` / `memory_write_episode` after a verified outcome.
 4. **Skill.** Installs `~/.claude/skills/backant-memory/SKILL.md` describing when
    each tool group applies.
-5. **SessionStart recall hook.** Registers a hook in `~/.claude/settings.json`
-   so every session opens with a recall digest of durable repo knowledge. Pass
-   `backant-memory install --no-hook` to skip this step.
+5. **Hooks** in `~/.claude/settings.json` (pass `--no-hook` to skip all three):
+   - **SessionStart** — opens every session with a digest: the latest handoff
+     brief, the latest automatic session summary ("Last session — resume here"),
+     and a recall of durable repo knowledge.
+   - **UserPromptSubmit** — *ambient recall*: every prompt is used as a cue and
+     the top hits are injected as `## Memory recall — <repo>` with tier, type,
+     age and id. Skips slash commands and trivial prompts; never repeats a hit
+     within a session; hard 2.5s deadline, warm path via the daemon's `/recall`.
+   - **PreCompact + SessionEnd** — writes one deterministic `session_summary`
+     row per session (prompts, files touched, outcome, branch) from the
+     transcript, in a detached worker so exit is never delayed. No model call.
+
+The MCP entry is registered with `"alwaysLoad": true` so the memory tools are
+never deferred behind Claude Code's tool search — a session that has to
+`ToolSearch` for its memory tools mostly won't.
 
 ## Verify
 
@@ -64,7 +76,12 @@ backant-memory install
 backant-memory status            # launchctl state + /healthz, one line
 backant-memory doctor            # every install check, pass/fail per item
 backant-memory doctor --verify-restart   # SIGKILL the daemon, prove launchd relaunches it
+backant-memory usage --days 30   # adoption: sessions by entrypoint, hook/digest presence, memory calls per 1k turns
 ```
+
+`usage` reads the Claude Code transcripts under `~/.claude/projects` (read-only)
+and is the number to watch: a store's size says nothing about whether agents
+actually recall and write.
 
 ## After a reboot
 
@@ -95,7 +112,7 @@ All settings are optional and read from the environment.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `BACKANT_MEMORY_HOME` | `~/.claude/kairos` | Data home. Shared with `backant-kairos` on purpose. |
+| `BACKANT_MEMORY_HOME` | `~/.claude/kairos` | Data home. Shared with `backant-kairos` on purpose. Honoured by the hooks' cold path too. |
 | `BACKANT_MEMORY_PORT` | `41414` | HTTP port for the daemon. |
 | `BACKANT_MEMORY_OLLAMA_URL` | `http://127.0.0.1:11434` | Local Ollama endpoint. Falls back to `KAIROS_OLLAMA_URL`. |
 | `BACKANT_MEMORY_EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Embedding model. Falls back to `KAIROS_EMBEDDING_MODEL`. |

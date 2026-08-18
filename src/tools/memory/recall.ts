@@ -41,6 +41,11 @@ export interface RecallHit {
   sources: string[];
   type: string;
   tier: string;
+  /** ISO timestamps so consumers can show an age — a months-old note must not
+   *  read like yesterday's. Optional only because pre-existing recall_cache rows
+   *  were written without them. */
+  created?: string;
+  last_reinforced?: string;
   edges?: unknown[];
 }
 
@@ -51,6 +56,7 @@ export interface MemoryRowForScore {
   sources: string;
   type: string;
   tier: string;
+  created?: string;
   last_reinforced: string;
   verdict_boost: number;
 }
@@ -147,6 +153,8 @@ export function combineScoresWithBreakdown(input: CombineScoresInput): ScoredHit
       tier: row.tier,
       sources: JSON.parse(row.sources),
       score: total,
+      created: row.created ?? row.last_reinforced,
+      last_reinforced: row.last_reinforced,
       breakdown,
     });
   }
@@ -222,7 +230,7 @@ export async function recall(deps: RecallDeps): Promise<RecallHit[]> {
     const rowParams: Record<string, string> = {};
     idsArr.forEach((id, i) => (rowParams[`id${i}`] = id));
     const rows = await deps.db.all<MemoryRowForScore>(
-      `SELECT id, content, weight, sources, type, tier, last_reinforced, verdict_boost
+      `SELECT id, content, weight, sources, type, tier, created, last_reinforced, verdict_boost
        FROM memory WHERE id IN (${placeholders})`,
       rowParams
     );
@@ -248,6 +256,8 @@ export async function recall(deps: RecallDeps): Promise<RecallHit[]> {
     sources: h.sources,
     type: h.type,
     tier: h.tier,
+    created: h.created,
+    last_reinforced: h.last_reinforced,
   }));
 
   await writeCache(deps.db, key, top, currentSeq);

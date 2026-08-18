@@ -14,7 +14,9 @@ export type MemoryType =
   | "priority"
   | "product-fact"
   | "epic_outcome"
-  | "procedure";
+  | "procedure"
+  /** Deterministic per-session digest written by the PreCompact/SessionEnd hook. */
+  | "session_summary";
 
 export interface MemoryEntry {
   id: string;

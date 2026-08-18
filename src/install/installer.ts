@@ -36,6 +36,11 @@ export interface InstallReport {
 const bundleDir = dirname(fileURLToPath(import.meta.url));
 const defaultAssetDir = () => join(bundleDir, "../assets");
 const defaultHookPath = () => join(bundleDir, "hooks/session-start-recall.js");
+const defaultPromptRecallHookPath = () => join(bundleDir, "hooks/prompt-recall.js");
+const defaultSessionSummaryHookPath = () => join(bundleDir, "hooks/session-summary.js");
+/** SessionEnd's default hook budget is 1.5s total; the summary hook hands off to
+ *  a detached worker immediately, but give it headroom to spawn. Seconds. */
+const SESSION_SUMMARY_HOOK_TIMEOUT_S = 20;
 export const defaultCliPath = () => join(bundleDir, "cli.js");
 // The executable stdio shim (#!/usr/bin/env node → dist/cli.js). Absolute and
 // upgrade-stable: Claude Code spawns it directly as `<binPath> serve`.
@@ -62,7 +67,10 @@ export async function runInstall(o: InstallOptions = {}): Promise<InstallReport>
   // serve`, which resolves the repo-scoped store for its own cwd (isolation +
   // kairos sharing). The launchd daemon stays up as the Ollama supervisor and
   // authenticated /digest + HTTP /mcp surface for other agents.
-  registerMcpServer({ claudeJsonPath, entry: { type: "stdio", command: binPath, args: ["serve"] } });
+  // alwaysLoad: with MCP tool search on (the default), a server's tools are
+  // deferred behind ToolSearch unless it opts out. Every session that used
+  // memory in the transcript audit had to ToolSearch for it first — pin it.
+  registerMcpServer({ claudeJsonPath, entry: { type: "stdio", command: binPath, args: ["serve"], alwaysLoad: true } });
   mkdirSync(claudeDir, { recursive: true });
   upsertManagedBlock(
     join(claudeDir, "CLAUDE.md"),
@@ -70,7 +78,13 @@ export async function runInstall(o: InstallOptions = {}): Promise<InstallReport>
   );
   installSkill(join(claudeDir, "skills"), assetDir);
   if (!o.noHook) {
-    registerHook(join(claudeDir, "settings.json"), `${process.execPath} ${defaultHookPath()}`);
+    const settings = join(claudeDir, "settings.json");
+    registerHook(settings, `${process.execPath} ${defaultHookPath()}`);
+    // Ambient recall: every prompt is a cue (no model judgment needed).
+    registerHook(settings, `${process.execPath} ${defaultPromptRecallHookPath()}`, { event: "UserPromptSubmit" });
+    // Close the write side: a deterministic session summary at compaction and exit.
+    registerHook(settings, `${process.execPath} ${defaultSessionSummaryHookPath()}`, { event: "PreCompact", timeout: SESSION_SUMMARY_HOOK_TIMEOUT_S });
+    registerHook(settings, `${process.execPath} ${defaultSessionSummaryHookPath()}`, { event: "SessionEnd", timeout: SESSION_SUMMARY_HOOK_TIMEOUT_S });
   }
   return { token, port, url };
 }
@@ -82,5 +96,7 @@ export async function runUninstall(o: InstallOptions = {}): Promise<void> {
   unregisterMcpServer({ claudeJsonPath });
   removeManagedBlock(join(claudeDir, "CLAUDE.md"));
   unregisterHook(join(claudeDir, "settings.json"), "session-start-recall");
+  unregisterHook(join(claudeDir, "settings.json"), "hooks/prompt-recall");
+  unregisterHook(join(claudeDir, "settings.json"), "hooks/session-summary");
   // skill dir left in place on purpose: harmless, and removal risks deleting user edits
 }
