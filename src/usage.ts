@@ -98,7 +98,10 @@ export interface UsageReport {
   topProjects: Array<{ project: string; sessions: number; usedMemory: number }>;
 }
 
-const WRITE_TOOLS = new Set(["memory_write_stm", "memory_write_ltm", "memory_write_episode", "procedure_propose", "task_state_write"]);
+// Legacy and consolidated names. `procedure`/`task_state` take an action we
+// don't see here, so they count on both sides — a slight over-count, stated.
+const WRITE_TOOLS = new Set(["memory_write", "memory_write_stm", "memory_write_ltm", "memory_write_episode", "procedure_propose", "task_state_write", "procedure", "task_state"]);
+const RECALL_TOOLS = new Set(["memory_recall", "memory_recall_with_edges", "memory_recall_by_id", "procedure_grounding", "procedure", "task_state_read", "task_state"]);
 
 export function aggregateUsage(sessions: SessionUsage[], opts: { minTurns?: number } = {}): UsageReport {
   const minTurns = opts.minTurns ?? 10;
@@ -116,7 +119,7 @@ export function aggregateUsage(sessions: SessionUsage[], opts: { minTurns?: numb
     const names = Object.keys(s.memoryCalls);
     const n = Object.values(s.memoryCalls).reduce((a, b) => a + b, 0);
     if (n > 0) r.usedMemory++;
-    if (names.some((x) => x.startsWith("memory_recall") || x === "procedure_grounding")) r.recalled++;
+    if (names.some((x) => RECALL_TOOLS.has(x))) r.recalled++;
     if (names.some((x) => WRITE_TOOLS.has(x))) r.wrote++;
     if (n > 0 && s.toolSearchMemory > 0) r.needededToolSearch++;
     rows.set(s.entrypoint, r);

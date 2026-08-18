@@ -16,9 +16,17 @@ program.command("serve")
   .option("--http", "serve streamable HTTP (used by launchd)")
   .option("--stdio", "serve stdio (default)")
   .option("--port <n>", "http port")
+  .option("--tools <profile>", "tool surface: 'core' (9 consolidated tools; stdio default) or 'full' (core + every legacy name; http default). Env: BACKANT_MEMORY_TOOLS")
   .action(async (opts) => {
     const paths = resolvePaths();
     const port = opts.port ? Number(opts.port) : paths.port;
+    // Tool surface: stdio (Claude Code) gets the consolidated core set; the HTTP
+    // daemon keeps every legacy name for other agents. --tools / env override.
+    const profileArg = (opts.tools ?? process.env.BACKANT_MEMORY_TOOLS) as string | undefined;
+    if (profileArg && profileArg !== "core" && profileArg !== "full") {
+      throw new Error(`--tools must be 'core' or 'full' (got ${profileArg})`);
+    }
+    const toolProfile = (profileArg as "core" | "full" | undefined) ?? (opts.http ? "full" : "core");
     // Direct DB override wins on both branches (test/pinned-store escape hatch).
     const dbOverride = process.env.BACKANT_MEMORY_DB;
     if (opts.http) {
@@ -29,6 +37,7 @@ program.command("serve")
         workspaceCwd: process.cwd(),
         ollamaUrl: paths.ollamaUrl,
         embeddingModel: paths.embeddingModel,
+        toolProfile,
         ...(dbOverride ? { memoryDbPath: dbOverride } : {}),
       });
       if (await siblingIsHealthy(port)) {
@@ -49,6 +58,7 @@ program.command("serve")
             ollamaUrl: paths.ollamaUrl,
             embeddingModel: paths.embeddingModel,
             memoryDbPath: dbOverride,
+            toolProfile,
           })
         : await (async () => {
             const ctx = await buildMemoryContext({
@@ -62,6 +72,7 @@ program.command("serve")
               embeddingModel: paths.embeddingModel,
               db: ctx.db,
               repo: ctx.repo,
+              toolProfile,
             });
           })();
       // stdio transport holds the event loop open; do NOT exit after this.
@@ -95,8 +106,11 @@ program.command("print-config")
   .option("--client <c>", "claude|cursor|generic", "generic")
   .action((opts) => {
     const paths = resolvePaths();
+    // stdio = core tool profile (9 consolidated tools); alwaysLoad keeps them out
+    // of Claude Code's tool-search deferral. Add `"--tools","full"` to args for
+    // every legacy tool name.
     const stdio = { mcpServers: { "backant-memory": {
-      type: "stdio", command: defaultBinPath(), args: ["serve"] } } };
+      type: "stdio", command: defaultBinPath(), args: ["serve"], alwaysLoad: true } } };
     const http = { mcpServers: { "backant-memory": {
       type: "http", url: `http://127.0.0.1:${paths.port}/mcp`,
       headers: { Authorization: `Bearer ${ensureToken(paths.tokenPath)}` } } } };
@@ -108,7 +122,7 @@ program.command("print-config")
     // Claude Code (per-session, repo-scoped); http+token is for other agents.
     console.log("# Claude Code (recommended — stdio, per-session repo-scoped):");
     console.log(JSON.stringify(stdio, null, 2));
-    console.log("# Other agents (http + bearer token, global store):");
+    console.log("# Other agents (http + bearer token, global store, full tool profile incl. legacy names):");
     console.log(JSON.stringify(http, null, 2));
   });
 
