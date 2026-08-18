@@ -1,16 +1,30 @@
 {
   "name": "backant-memory",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Local-first vectorized memory for AI agents — always-on MCP service",
   "type": "module",
   "exports": {
-    ".":        { "types": "./dist/index.d.ts",        "import": "./dist/index.js" },
-    "./tools":  { "types": "./dist/tools/index.d.ts",  "import": "./dist/tools/index.js" },
-    "./docker": { "types": "./dist/docker/index.d.ts", "import": "./dist/docker/index.js" },
-    "./ollama": { "types": "./dist/ollama/index.d.ts", "import": "./dist/ollama/index.js" },
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "import": "./dist/tools/index.js"
+    },
+    "./docker": {
+      "types": "./dist/docker/index.d.ts",
+      "import": "./dist/docker/index.js"
+    },
+    "./ollama": {
+      "types": "./dist/ollama/index.d.ts",
+      "import": "./dist/ollama/index.js"
+    },
     "./package.json": "./package.json"
   },
-  "bin": { "backant-memory": "bin/backant-memory.js" },
+  "bin": {
+    "backant-memory": "bin/backant-memory.js"
+  },
   "scripts": {
     "build": "tsup",
     "pretest": "npm run build",
@@ -19,7 +33,12 @@
     "prepublishOnly": "npm run build",
     "postinstall": "node dist/postinstall.js || true"
   },
-  "files": ["dist", "bin", "assets", "LICENSE"],
+  "files": [
+    "dist",
+    "bin",
+    "assets",
+    "LICENSE"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/backant-io/backant-memory.git"
@@ -28,7 +47,9 @@
   "bugs": {
     "url": "https://github.com/backant-io/backant-memory/issues"
   },
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "author": "Pavel Hegler <business@hegler.tech>",
   "license": "Elastic-2.0",
   "dependencies": {
