@@ -5,31 +5,32 @@ description: Use when starting work on any task with possible history (recall fi
 
 # backant-memory — persistent vectorized memory
 
-Repo-scoped, local-first memory from the `backant-memory` MCP server (per-session, scoped to this repo). A background service keeps the local embedding runtime warm. Tool prefix: `mcp__backant-memory__`.
+Repo-scoped, local-first memory from the `backant-memory` MCP server (per-session, scoped to this repo). A background service keeps the local embedding runtime warm. Tool prefix: `mcp__backant-memory__`. Nine tools; every "action" tool takes an `action` enum.
 
-## Session start
-1. `procedure_sweep` once per session (marks stale runbooks).
-2. `task_state_read` (no args) to list active epics; with `epic_id` to resume one.
+## What happens automatically (no call needed)
+- **Every prompt** is recalled against: hits arrive as `## Memory recall — <repo>` with `[tier · type · age] … (id)`. Read them; older hits may be stale.
+- **Session start** injects the last session's summary ("Last session — resume here"), any handoff brief, and a digest of durable repo knowledge.
+- **PreCompact / session end** writes one deterministic `session_summary` (what happened — not what you learned).
 
 ## Before deciding or building
-- `memory_recall {cue, k?}` — hybrid BM25+vector+recency retrieval. ALWAYS do this before re-deriving anything that may have history.
-- `memory_recall_with_edges {cue, edge_depth?}` — when consequences/relations matter.
-- `memory_pattern_check {domains}` — check for repeated failure patterns before retrying an approach.
-- `procedure_grounding {trigger, action_type}` — fetch runbooks for the action; follow "follow-this" results, verify "draft-verify" ones.
+- `memory_recall {cue, k?, tier?, types?, id?, with_edges?, edge_depth?}` — a different angle than the automatic recall, a deeper k, one entry by `id`, or relationships (`with_edges`). Returns `{hits, count, note?}`; an empty result says "no memories yet — write one".
+- `procedure {action:"grounding", trigger, action_type}` — runbooks for the action: follow "follow-this", verify "draft-verify".
+- `memory_maintain {action:"pattern_check", domains}` — repeated failure patterns before retrying an approach.
+- `task_state {action:"read", epic_id?}` — resume a long-running epic; no epic_id lists active ones.
 
 ## After acting
-- `memory_write_episode` — every meaningful attempt: situation, action, expected vs outcome, evidence.
-- `memory_write_stm {type, content, sources}` — observations/hypotheses/anomalies worth keeping.
-- `memory_write_ltm {type, content, sources, reason}` — ONLY verified durable knowledge.
-- `procedure_outcome {procedure_id, outcome, ...}` — whenever a runbook was applied.
-- `procedure_propose` — after a VERIFIED success worth repeating; list depends_on_paths honestly.
+- `memory_write_episode {situation, action_type, action_taken, expected, outcome, evidence}` — every meaningful attempt, especially failures and surprises. epic_id/cycle_id optional.
+- `memory_write {tier:"stm"|"ltm", type, content, sources, reason?}` — `stm` for observations/hypotheses/anomalies; `ltm` ONLY for verified durable knowledge, with a reason. Do NOT write restatements of the diff, file listings, or anything greppable — write what is not derivable from the code (decisions and why, verified commands, gotchas, failure signatures, agreed conventions). Recall first so you reinforce instead of duplicating.
+- `memory_reinforce {id, factor?, reason?}` — a recalled memory proved right; defaults factor 1.2, reason 'act-cite'.
+- `procedure {action:"outcome", procedure_id, outcome, judge_confirmed, situation, action_type, evidence}` — whenever a runbook was applied; `{action:"propose", name, trigger, steps, depends_on_paths, sources}` after a VERIFIED success worth repeating.
 
 ## Curation (when reviewing memory, not every session)
-- `memory_reinforce` / `memory_bump_verdict_boost` — memory proved useful.
-- `memory_revise_ltm` — content is outdated; state the reason.
-- `memory_promote` / `memory_demote` — STM↔LTM transitions with reasons.
-- `memory_edge_propose` → review → `memory_edge_approve` / `memory_edge_reject`; list open ones with `edges_pending`.
-- `memory_decay_sweep` — periodic hygiene only.
+- `memory_edit {action:"revise"|"promote"|"demote", id, new_content?, reason}`.
+- `memory_graph {action:"propose"|"approve"|"reject"|"pending"|"list", ...}` — typed edges (related_to|contradicts|supports|supersedes|refines); approving a `supersedes` edge invalidates the superseded entry.
+- `memory_maintain {action:"decay_sweep"}` and `procedure {action:"sweep"}` — periodic hygiene only.
 
 ## Long-running work
-- `task_state_write` — rewrite the durable plan for an epic at every significant state change.
+- `task_state {action:"write", epic_id, title, status, plan, open_threads, touched, blockers}` — rewrite the durable plan at every significant state change.
+
+## Legacy names
+Servers started with `serve --tools full` (the HTTP daemon, or `BACKANT_MEMORY_TOOLS=full`) also expose the pre-consolidation names (`memory_write_stm`, `memory_recall_with_edges`, `task_state_read`, …). They behave the same; prefer the nine above.

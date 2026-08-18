@@ -70,6 +70,23 @@ The MCP entry is registered with `"alwaysLoad": true` so the memory tools are
 never deferred behind Claude Code's tool search — a session that has to
 `ToolSearch` for its memory tools mostly won't.
 
+## Tool surface
+
+Two profiles, one implementation:
+
+- **`core`** (default for stdio / Claude Code) — nine trigger-first tools:
+  `memory_recall` (cue, `id`, or `with_edges`), `memory_write` (`tier: stm|ltm`),
+  `memory_write_episode`, `memory_reinforce`, `memory_edit` (revise|promote|demote),
+  `memory_graph` (edges), `procedure` (grounding|propose|outcome|sweep),
+  `task_state` (read|write), `memory_maintain` (decay_sweep|pattern_check).
+- **`full`** (default for the HTTP daemon; `serve --tools full` or
+  `BACKANT_MEMORY_TOOLS=full`) — core **plus every pre-0.4 name unchanged**
+  (`memory_write_stm`, `memory_recall_with_edges`, `task_state_read`, …). Same
+  handlers, so nothing that talks to the legacy surface breaks.
+
+`memory_recall` returns `{hits, count, note?}` — an empty result carries a
+"no memories yet — write one" note instead of a bare `[]`.
+
 ## Verify
 
 ```bash
