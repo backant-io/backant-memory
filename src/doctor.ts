@@ -14,7 +14,14 @@ export async function runDoctor(opts: { verifyRestart?: boolean } = {}): Promise
   checks.push([`http healthz :${paths.port}`, healthy]);
   checks.push(["token file 0600", existsSync(paths.tokenPath) && (statSync(paths.tokenPath).mode & 0o777) === 0o600]);
   const cj = join(homedir(), ".claude.json");
-  checks.push(["mcp registered", existsSync(cj) && JSON.stringify(JSON.parse(readFileSync(cj, "utf8")).mcpServers ?? {}).includes("backant-memory")]);
+  const mcpEntry = existsSync(cj) ? (JSON.parse(readFileSync(cj, "utf8")).mcpServers ?? {})["backant-memory"] : undefined;
+  checks.push(["mcp registered", mcpEntry !== undefined]);
+  checks.push(["mcp alwaysLoad (not deferred behind ToolSearch)", mcpEntry?.alwaysLoad === true]);
+  const settingsPath = join(homedir(), ".claude/settings.json");
+  const hooksJson = existsSync(settingsPath) ? JSON.stringify(JSON.parse(readFileSync(settingsPath, "utf8")).hooks ?? {}) : "";
+  checks.push(["hook: SessionStart digest", hooksJson.includes("session-start-recall")]);
+  checks.push(["hook: UserPromptSubmit auto-recall", hooksJson.includes("hooks/prompt-recall")]);
+  checks.push(["hook: PreCompact/SessionEnd summary", hooksJson.includes("hooks/session-summary")]);
   const cmd = join(homedir(), ".claude/CLAUDE.md");
   checks.push(["CLAUDE.md block", existsSync(cmd) && readFileSync(cmd, "utf8").includes("backant-memory:start")]);
   checks.push(["skill installed", existsSync(join(homedir(), ".claude/skills/backant-memory/SKILL.md"))]);

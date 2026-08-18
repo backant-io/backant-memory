@@ -8,6 +8,7 @@ import { Embedder } from "../ollama/embeddings.js";
 import { OllamaClient } from "../ollama/client.js";
 import type { MemoryDb } from "../memory/libsql-db.js";
 import { readLatestHandoffBrief, buildHandoffSection } from "../memory/handoff-brief.js";
+import { readLatestSessionSummary, buildLastSessionSection } from "./session-summary.js";
 import { deriveDecisionCues, type TaskStateForCues } from "./decision-cues.js";
 
 /**
@@ -52,7 +53,12 @@ export function chooseCues(taskState: TaskStateForCues | null): string[] {
   return merged;
 }
 
+/** Row types that get their own digest section (or are never embedded) and so
+ *  must not also compete for the cue-recall lines. */
+const DIGEST_EXCLUDED_TYPES = new Set(["session_summary", "handoff_brief", "task_state"]);
+
 export function buildRecallDigest(repo: string, hits: RecallHit[]): string {
+  hits = hits.filter((h) => !DIGEST_EXCLUDED_TYPES.has(h.type));
   if (hits.length === 0) return "";
   const lines = dedupeById(hits)
     .slice(0, 12)
@@ -125,8 +131,16 @@ export async function buildDigestForCwd(
   } catch {
     /* no handoff yet — inject only the recall digest */
   }
+  // The deterministic per-session summary written by the PreCompact/SessionEnd
+  // hook: the "what was I doing" bridge for repos with no kairos epic.
+  let lastSessionSection = "";
+  try {
+    lastSessionSection = buildLastSessionSection(await readLatestSessionSummary(server.db));
+  } catch {
+    /* none yet */
+  }
   const digest = buildRecallDigest(server.db.repo || cwd, hits);
-  return [handoffSection, digest].filter(Boolean).join("\n\n");
+  return [handoffSection, lastSessionSection, digest].filter(Boolean).join("\n\n");
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -165,6 +179,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         workspaceCwd: cwd,
         embeddingModel: paths.embeddingModel,
         forceLocal: true,
+        kairosHome: paths.home,
       });
       const client = new OllamaClient({ baseUrl: paths.ollamaUrl });
       const embedder = new Embedder({ client, model: paths.embeddingModel });

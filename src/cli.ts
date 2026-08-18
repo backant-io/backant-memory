@@ -119,6 +119,20 @@ program.command("doctor")
     process.exit(await runDoctor(opts));
   });
 
+program.command("usage")
+  .description("measure memory adoption from Claude Code transcripts (~/.claude/projects): sessions by entrypoint, hook/digest presence, memory calls per 1k turns")
+  .option("--days <n>", "look back this many days", "30")
+  .option("--min-turns <n>", "ignore sessions with fewer assistant turns", "10")
+  .option("--projects-dir <path>", "override ~/.claude/projects")
+  .option("--json", "emit the report as JSON")
+  .action(async (opts) => {
+    const { scanTranscripts, aggregateUsage, renderUsageReport } = await import("./usage.js");
+    const days = Number(opts.days) || 30;
+    const sessions = await scanTranscripts({ projectsDir: opts.projectsDir, sinceMs: Date.now() - days * 86_400_000 });
+    const report = aggregateUsage(sessions, { minTurns: Number(opts.minTurns) || 10 });
+    console.log(opts.json ? JSON.stringify(report, null, 2) : renderUsageReport(report, { days }));
+  });
+
 program.parseAsync().catch((err) => {
   console.error(String(err?.message ?? err));
   process.exit(1);

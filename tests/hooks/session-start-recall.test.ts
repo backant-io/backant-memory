@@ -103,6 +103,26 @@ describe("buildDigestForCwd", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("shows the latest session summary as its own section and keeps it out of the cue lines", async () => {
+    // WHY: the deterministic summary is the resume bridge for repos without a
+    // kairos epic; rendering it once, labelled, beats letting its long body win
+    // BM25 against the fixed cues and crowd out durable rows.
+    const { upsertSessionSummary } = await import("../../src/hooks/session-summary.js");
+    const dir = mkdtempSync(join(tmpdir(), "bam-hook-"));
+    const db = await openMemoryDb({ localPath: join(dir, "m.db") });
+    await writeStm({ db, embedder: fakeEmbedder, input: { type: "fact", content: "deployment health check command is make health", sources: [] } });
+    await upsertSessionSummary({ db, embedder: fakeEmbedder, sessionId: "s9", event: "SessionEnd",
+      content: "Session 2026-08-18 on o/r@main (12 turns). Asked: fix auth. Touched: oauth.ts. Outcome: tests green." });
+    const digest = await buildDigestForCwd(dir, { db, embedder: fakeEmbedder });
+    expect(digest).toContain("## Last session — resume here");
+    expect(digest).toContain("Outcome: tests green.");
+    expect(digest).toContain("make health");
+    // the summary body appears exactly once (its section), never as a "- (session_summary)" cue line
+    expect(digest).not.toContain("(session_summary)");
+    await db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("returns '' when memory is empty", async () => {
     const dir = mkdtempSync(join(tmpdir(), "bam-hook-"));
     const db = await openMemoryDb({ localPath: join(dir, "m.db") });

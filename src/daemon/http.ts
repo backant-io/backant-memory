@@ -38,29 +38,34 @@ export async function startHttpDaemon(opts: DaemonOptions) {
       }
       if (!authorized(req)) { res.writeHead(401).end(); return; }
 
-      // /digest returns a read-only recall of the caller's repo memory. It sits
-      // BELOW the auth gate (bearer required) because it exposes memory content;
-      // the SessionStart hook reads the token file to take this warm path. Each
-      // request opens the store repo-scoped to its ?cwd — one daemon, many repos.
-      // Any failure returns {digest:""} so session start is never blocked.
+      // Per-cwd store resolution shared by /digest and /recall: both sit BELOW
+      // the auth gate (bearer required) because they expose memory content, and
+      // both open the store repo-scoped to ?cwd — one daemon, many repos.
+      const openStoreForCwd = async (cwd: string): Promise<MemoryDb> => {
+        const origin = readOrigin(cwd);
+        const key = deriveIdentity(origin).repoKey;
+        let db = digestDbCache.get(key);
+        if (!db) {
+          const ctx = await buildMemoryContext({
+            workspaceCwd: cwd,
+            originUrl: origin,
+            embeddingModel: opts.embeddingModel,
+            forceLocal: true,
+            kairosHome: opts.kairosHome,
+          });
+          db = ctx.db;
+          digestDbCache.set(key, db);
+        }
+        return db;
+      };
+
+      // /digest returns the SessionStart digest for the caller's repo. Any
+      // failure returns {digest:""} so session start is never blocked.
       if (url.pathname === "/digest" && req.method === "GET") {
         let digest = "";
         try {
           const cwd = url.searchParams.get("cwd") ?? "/";
-          const origin = readOrigin(cwd);
-          const key = deriveIdentity(origin).repoKey;
-          let db = digestDbCache.get(key);
-          if (!db) {
-            const ctx = await buildMemoryContext({
-              workspaceCwd: cwd,
-              originUrl: origin,
-              embeddingModel: opts.embeddingModel,
-              forceLocal: true,
-              kairosHome: opts.kairosHome,
-            });
-            db = ctx.db;
-            digestDbCache.set(key, db);
-          }
+          const db = await openStoreForCwd(cwd);
           const { buildDigestForCwd } = await import("../hooks/session-start-recall.js");
           digest = await buildDigestForCwd(cwd, { db, embedder: opts.server.embedder });
         } catch {
@@ -68,6 +73,31 @@ export async function startHttpDaemon(opts: DaemonOptions) {
         }
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify({ digest }));
+        return;
+      }
+
+      // /recall is the warm path for the UserPromptSubmit hook: one cue, top-k
+      // hits for the caller's repo. Any failure returns {hits:[]} — a prompt is
+      // never held up by memory.
+      if (url.pathname === "/recall" && req.method === "GET") {
+        let hits: unknown[] = [];
+        let repo = "";
+        try {
+          const cwd = url.searchParams.get("cwd") ?? "/";
+          const cue = (url.searchParams.get("cue") ?? "").trim();
+          const k = Math.min(20, Math.max(1, Number(url.searchParams.get("k") ?? 4) || 4));
+          const caller = url.searchParams.get("caller") ?? "prompt";
+          if (cue) {
+            const db = await openStoreForCwd(cwd);
+            repo = db.repo;
+            const { recall } = await import("../tools/memory/recall.js");
+            hits = await recall({ db, embedder: opts.server.embedder, caller, input: { cue, k } });
+          }
+        } catch {
+          /* recall must never break a prompt */
+        }
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ repo, hits }));
         return;
       }
 
