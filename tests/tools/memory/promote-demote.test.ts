@@ -164,8 +164,9 @@ describe("promote/demote", () => {
     const ra = await promote({ db, stm_id: a.id, reason: "r" });
     const rb = await promote({ db, stm_id: b.id, reason: "r" });
 
-    expect(ra.ltm_id).toBe("ltm_observation_001");
-    expect(rb.ltm_id).toBe("ltm_observation_002");
+    // repo-scoped ids (o/r → "o-r"): unique across repos sharing one owner db
+    expect(ra.ltm_id).toBe("ltm_o-r_observation_001");
+    expect(rb.ltm_id).toBe("ltm_o-r_observation_002");
     await db.close();
   });
 });

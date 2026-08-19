@@ -33,7 +33,7 @@ describe("procedurePropose", () => {
         sources: ["pr:#412"],
       },
     });
-    expect(r.id).toMatch(/^ltm_procedure_\d+$/);
+    expect(r.id).toMatch(/^ltm_o-r_procedure_\d+$/);
     const row = await db.get<any>("SELECT * FROM memory WHERE id = ?", [r.id]);
     expect(row.tier).toBe("ltm");
     expect(row.type).toBe("procedure");
@@ -55,8 +55,8 @@ describe("procedurePropose", () => {
     const a = await procedurePropose({ db, embedder, input: mk("first") });
     const b = await procedurePropose({ db, embedder, input: mk("second") });
 
-    expect(a.id).toBe("ltm_procedure_001");
-    expect(b.id).toBe("ltm_procedure_002");
+    expect(a.id).toBe("ltm_o-r_procedure_001");
+    expect(b.id).toBe("ltm_o-r_procedure_002");
     expect(await db.get<any>("SELECT id FROM memory WHERE id = ?", [a.id])).toBeTruthy();
     expect(await db.get<any>("SELECT id FROM memory WHERE id = ?", [b.id])).toBeTruthy();
   });
