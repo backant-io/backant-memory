@@ -67,7 +67,7 @@ describe("consolidated tool dispatch", () => {
     const stm = (await s.callTool("memory_write", { tier: "stm", type: "observation", content: "flaky test in ci on arm64", sources: ["ci"] })) as any;
     expect(stm.id.startsWith("stm_")).toBe(true);
     const ltm = (await s.callTool("memory_write", { tier: "ltm", type: "lesson", content: "always run make health before deploy", sources: ["runbook"], reason: "verified twice" })) as any;
-    expect(ltm.id.startsWith("ltm_lesson_")).toBe(true);
+    expect(ltm.id).toMatch(/^ltm_.*lesson_\d+$/);
     const r = (await s.callTool("memory_recall", { cue: "deploy health", k: 5 })) as any;
     expect(r.hits.length).toBe(2);
     expect(r.note).toBeUndefined();
@@ -83,7 +83,7 @@ describe("consolidated tool dispatch", () => {
     const s = await srv("core");
     const stm = (await s.callTool("memory_write", { tier: "stm", type: "observation", content: "obs", sources: [] })) as any;
     const promoted = (await s.callTool("memory_edit", { action: "promote", id: stm.id, reason: "confirmed" })) as any;
-    expect(promoted.ltm_id.startsWith("ltm_observation_")).toBe(true);
+    expect(promoted.ltm_id).toMatch(/^ltm_.*observation_\d+$/);
     const revised = (await s.callTool("memory_edit", { action: "revise", id: promoted.ltm_id, new_content: "obs v2", reason: "clarified" })) as any;
     expect(revised.new_version).toBe(1);
     const reinforced = (await s.callTool("memory_reinforce", { id: promoted.ltm_id })) as any;   // factor/reason default
