@@ -87,6 +87,30 @@ Two profiles, one implementation:
 `memory_recall` returns `{hits, count, note?}` — an empty result carries a
 "no memories yet — write one" note instead of a bare `[]`.
 
+## Shell verbs
+
+For agents whose only channel is a shell — no MCP client, no session. The four
+verbs run against the same repo-scoped store the MCP server serves for that
+checkout (git origin of the cwd), so a verb and a tool call are one memory:
+
+```bash
+backant-memory recall --cue "auth token refresh bug" --k 5
+backant-memory reinforce --id ltm_owner-repo_lesson_003
+backant-memory write --tier stm --type observation \
+  --content "the retry loop swallows 429s" --source src/http/retry.ts
+backant-memory write --tier ltm --type lesson \
+  --content "..." --source PR#41 --reason "verified by the failing test in CI"
+backant-memory episode --situation "..." --action "..." \
+  --expected success --outcome partial --evidence "test X still red"
+```
+
+`recall` prints **one JSON object per line** (`id`, `tier`, `type`, `age`,
+`content`) so it pipes into `jq`, `head` or `grep` without waiting for an array
+to close; the other three print one JSON line with what they wrote. `--tier ltm`
+requires `--reason`, the same gate `memory_write` applies. Any verb exits
+non-zero with the reason on stderr when the store or the embedding model cannot
+be reached.
+
 ## Verify
 
 ```bash

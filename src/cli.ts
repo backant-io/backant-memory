@@ -133,6 +133,103 @@ program.command("doctor")
     process.exit(await runDoctor(opts));
   });
 
+// ---- the four memory verbs -------------------------------------------------
+// One process, one command, one JSON line back (spec 2026-09-01 §12). Every verb
+// opens the same repo-scoped store `serve --stdio` opens for this cwd, runs the
+// same operation the matching MCP tool runs, prints its result and closes. The
+// implementations live in ./verbs.js so the shell path and the MCP path cannot
+// drift into two behaviours with one name.
+async function withSession<T>(run: (s: import("./verbs.js").VerbSession) => Promise<T>): Promise<T> {
+  const { openSession } = await import("./verbs.js");
+  let session;
+  try {
+    session = await openSession();
+  } catch (err) {
+    // The store is the precondition for all four verbs; say which one failed and
+    // where, rather than letting a libsql/provisioning message surface bare.
+    throw new Error(`memory store unreachable: ${(err as Error).message}`);
+  }
+  try {
+    return await run(session);
+  } finally {
+    await session.close().catch(() => {});
+  }
+}
+
+/** Repeatable option collector: `--source a --source b` → ["a","b"]. */
+function collect(value: string, previous: string[]): string[] {
+  return [...previous, value];
+}
+
+program.command("recall")
+  .description("recall stored knowledge for this repo; prints one JSON object per hit (id, tier, type, age, content)")
+  .requiredOption("--cue <text>", "short cue, e.g. 'auth token refresh bug'")
+  .option("--k <n>", "how many hits to return", "10")
+  .action(async (opts) => {
+    const k = Number(opts.k);
+    if (!Number.isFinite(k) || k < 1) throw new Error(`--k must be a positive number (got ${JSON.stringify(opts.k)})`);
+    const lines = await withSession(async (s) => {
+      const { runRecall } = await import("./verbs.js");
+      return runRecall(s, { cue: opts.cue, k });
+    });
+    // One JSON object per line: a shell can pipe it to jq, head or grep without
+    // parsing an array that only ends when the process does.
+    for (const line of lines) console.log(JSON.stringify(line));
+  });
+
+program.command("reinforce")
+  .description("a recalled entry proved right: bump its weight and citation count")
+  .requiredOption("--id <id>", "the id printed by recall")
+  .option("--reason <text>", "why it proved right (default 'act-cite', the citation reason recall ranks on)")
+  .action(async (opts) => {
+    const r = await withSession(async (s) => {
+      const { runReinforce } = await import("./verbs.js");
+      return runReinforce(s, { id: opts.id, reason: opts.reason });
+    });
+    console.log(JSON.stringify(r));
+  });
+
+program.command("write")
+  .description("write a memory for this repo; ltm is verified, durable knowledge and requires --reason")
+  .requiredOption("--tier <tier>", "stm|ltm")
+  .requiredOption("--type <type>", "observation|lesson|architecture|principle|gotcha|convention|…")
+  .requiredOption("--content <text>", "what you learned, in words that are not derivable from the code")
+  // Not `requiredOption`: commander only enforces that on an option with no
+  // default, and a repeatable collector needs [] to collect into. runWrite makes
+  // the requirement, and says what a source is when it is missing.
+  .option("--source <path>", "REQUIRED. where it came from: path, URL, PR id or command (repeatable)", collect, [])
+  .option("--reason <text>", "required for --tier ltm: why this is durable and verified")
+  .action(async (opts) => {
+    const r = await withSession(async (s) => {
+      const { runWrite } = await import("./verbs.js");
+      return runWrite(s, {
+        tier: opts.tier, type: opts.type, content: opts.content,
+        sources: opts.source, reason: opts.reason,
+      });
+    });
+    console.log(JSON.stringify(r));
+  });
+
+program.command("episode")
+  .description("record an attempt whose result you want remembered; weight is surprise-scaled (mismatch = 2x)")
+  .requiredOption("--situation <text>", "what the situation was")
+  .requiredOption("--action <text>", "what you did")
+  .requiredOption("--expected <outcome>", "success|failure — what you expected BEFORE you knew")
+  .requiredOption("--outcome <outcome>", "success|failure|partial — what actually happened")
+  .option("--evidence <text>", "what shows it: command output, test name, link")
+  .option("--action-type <type>", "fix|merge|implement|review-feedback|migrate|investigate|other", "other")
+  .action(async (opts) => {
+    const r = await withSession(async (s) => {
+      const { runEpisode } = await import("./verbs.js");
+      return runEpisode(s, {
+        situation: opts.situation, action: opts.action,
+        expected: opts.expected, outcome: opts.outcome,
+        evidence: opts.evidence, actionType: opts.actionType,
+      });
+    });
+    console.log(JSON.stringify(r));
+  });
+
 program.command("usage")
   .description("measure memory adoption from Claude Code transcripts (~/.claude/projects): sessions by entrypoint, hook/digest presence, memory calls per 1k turns")
   .option("--days <n>", "look back this many days", "30")

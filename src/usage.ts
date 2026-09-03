@@ -2,6 +2,7 @@ import { createReadStream, readdirSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
+import { VERBS } from "./constants.js";
 
 /**
  * `backant-memory usage` — measure adoption from Claude Code transcripts instead
@@ -96,6 +97,10 @@ export interface UsageReport {
   totalMemoryCalls: number;
   callsPer1kTurns: number;
   topProjects: Array<{ project: string; sessions: number; usedMemory: number }>;
+  /** The shell verbs this build exposes. Adoption is measured over MCP calls,
+   *  but the CLI is the channel the Agent Office employees are told to use, so
+   *  the report names it in both output modes rather than only in --help. */
+  cliVerbs: string[];
 }
 
 // Legacy and consolidated names. `procedure`/`task_state` take an action we
@@ -140,6 +145,7 @@ export function aggregateUsage(sessions: SessionUsage[], opts: { minTurns?: numb
     totalMemoryCalls: calls,
     callsPer1kTurns: turns > 0 ? (calls / turns) * 1000 : 0,
     topProjects: Array.from(projects.entries()).map(([project, v]) => ({ project, ...v })).sort((a, b) => b.sessions - a.sessions).slice(0, 10),
+    cliVerbs: [...VERBS],
   };
 }
 
@@ -161,6 +167,7 @@ export function renderUsageReport(r: UsageReport, opts: { days?: number } = {}):
     for (const p of r.topProjects) out.push(`  ${p.sessions}\t${p.usedMemory}\t${p.project}`);
   }
   out.push("");
+  out.push(`CLI verbs (no MCP required): ${r.cliVerbs.map((v) => `backant-memory ${v}`).join(", ")}`);
   out.push("Note: 'via ToolSearch' counts sessions that had to load the tools before using them (deferred MCP). `backant-memory install` sets alwaysLoad to remove that step.");
   return out.join("\n");
 }
