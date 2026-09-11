@@ -147,6 +147,81 @@ program.command("usage")
     console.log(opts.json ? JSON.stringify(report, null, 2) : renderUsageReport(report, { days }));
   });
 
+// ---- the four memory verbs (spec: employees carry the CLI, never MCP) ----
+// Each opens the SAME repo-scoped store `serve` opens for stdio, so an effect
+// written here is found by the MCP tools that store serves, and vice versa.
+// Errors (store unreachable, bad enum, ltm without a reason) fall through to the
+// handler at the bottom of this file: reason on stderr, non-zero exit.
+
+program.command("recall")
+  .description("recall memories for a cue; one JSON object per line with id, tier, type, age and content")
+  .requiredOption("--cue <text>", "what you are about to re-derive")
+  .option("--k <n>", "how many hits", "10")
+  .option("--tier <tier>", "any|stm|ltm", "any")
+  .option("--cross-repo", "recall across every repo in the namespace")
+  .action(async (opts) => {
+    const { openCliStore, runRecall } = await import("./memory-verbs.js");
+    const store = await openCliStore();
+    const lines = await runRecall(store, {
+      cue: opts.cue,
+      k: Number(opts.k) || 10,
+      tier: opts.tier,
+      crossRepo: Boolean(opts.crossRepo),
+    });
+    for (const line of lines) console.log(line);
+  });
+
+program.command("reinforce")
+  .description("mark a recalled entry as having proved right")
+  .requiredOption("--id <id>", "the id a recall printed")
+  .option("--reason <text>", "citation category: act-cite|dream-cite raise verdict_boost, anything else only touches last_reinforced", "act-cite")
+  .option("--factor <n>", "weight multiplier, capped at 1.0", "1.2")
+  .action(async (opts) => {
+    const { openCliStore, runReinforce } = await import("./memory-verbs.js");
+    const store = await openCliStore();
+    console.log(JSON.stringify(await runReinforce(store, {
+      id: opts.id,
+      reason: opts.reason,
+      factor: Number(opts.factor) || 1.2,
+    })));
+  });
+
+program.command("write")
+  .description("write one memory; ltm requires --reason")
+  .requiredOption("--tier <tier>", "stm|ltm")
+  .requiredOption("--type <type>", "observation|lesson|principle|architecture|...")
+  .requiredOption("--content <text>", "what is worth keeping")
+  .requiredOption("--source <path_or_url>", "where it came from")
+  .option("--reason <text>", "why this is durable, verified knowledge (required for ltm)")
+  .action(async (opts) => {
+    const { openCliStore, runWrite } = await import("./memory-verbs.js");
+    const store = await openCliStore();
+    console.log(JSON.stringify(await runWrite(store, opts)));
+  });
+
+program.command("episode")
+  .description("record an attempt whose result surprised you")
+  .requiredOption("--situation <text>", "what you were facing")
+  .requiredOption("--action <text>", "what you did")
+  .requiredOption("--expected <e>", "success|failure")
+  .requiredOption("--outcome <o>", "success|failure|partial")
+  .option("--evidence <text>", "what shows the outcome")
+  .option("--action-type <t>", "fix|merge|implement|review-feedback|migrate|investigate|other", "other")
+  .option("--epic-id <id>", "group this episode under an epic", "adhoc")
+  .action(async (opts) => {
+    const { openCliStore, runEpisode } = await import("./memory-verbs.js");
+    const store = await openCliStore();
+    console.log(JSON.stringify(await runEpisode(store, {
+      situation: opts.situation,
+      action: opts.action,
+      expected: opts.expected,
+      outcome: opts.outcome,
+      evidence: opts.evidence,
+      actionType: opts.actionType,
+      epicId: opts.epicId,
+    })));
+  });
+
 program.parseAsync().catch((err) => {
   console.error(String(err?.message ?? err));
   process.exit(1);
