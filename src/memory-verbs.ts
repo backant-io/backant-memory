@@ -28,6 +28,25 @@ export interface CliStore {
 }
 
 /**
+ * Three of the four verbs embed before they can touch the store, and the bare
+ * failure from `fetch` is the words "fetch failed", from a shell that cannot
+ * tell a stopped ollama from a missing model from a typo in the URL. Name both,
+ * and change nothing else.
+ */
+function embedderThatSaysWhereItFailed(inner: Embedder, url: string, model: string): Embedder {
+  const say = (err: unknown) =>
+    new Error(`embedding model unreachable: ${model} at ${url} (${(err as Error).message}); is ollama running?`);
+  return {
+    async embed(text: string) {
+      try { return await inner.embed(text); } catch (err) { throw say(err); }
+    },
+    async embedBatch(texts: string[]) {
+      try { return await inner.embedBatch(texts); } catch (err) { throw say(err); }
+    },
+  } as unknown as Embedder;
+}
+
+/**
  * Open the same store `serve` opens for stdio: repo-scoped by the git origin of
  * the cwd, local replica only. BACKANT_MEMORY_DB pins a fixed file, matching the
  * escape hatch `serve` already honours, so a test can point both surfaces at one
@@ -35,10 +54,14 @@ export interface CliStore {
  */
 export async function openCliStore(cwd: string = process.cwd()): Promise<CliStore> {
   const paths = resolvePaths();
-  const embedder = new Embedder({
-    client: new OllamaClient({ baseUrl: paths.ollamaUrl }),
-    model: paths.embeddingModel,
-  });
+  const embedder = embedderThatSaysWhereItFailed(
+    new Embedder({
+      client: new OllamaClient({ baseUrl: paths.ollamaUrl }),
+      model: paths.embeddingModel,
+    }),
+    paths.ollamaUrl,
+    paths.embeddingModel
+  );
   const override = process.env.BACKANT_MEMORY_DB;
   if (override) {
     const repo = deriveIdentity(readOrigin(cwd)).repoKey;

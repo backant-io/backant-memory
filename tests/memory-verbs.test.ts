@@ -11,6 +11,7 @@ import {
   runRecall,
   runReinforce,
   runWrite,
+  openCliStore,
   type CliStore,
 } from "../src/memory-verbs.js";
 import { CLI_MEMORY_VERBS } from "../src/constants.js";
@@ -172,6 +173,31 @@ describe("the four memory verbs the office CLI exposes", () => {
     expect(humanAge(ago(120 * 86_400_000), now)).toBe("4mo");
     expect(humanAge(ago(800 * 86_400_000), now)).toBe("2y");
     expect(humanAge(undefined, now)).toBe("unknown");
+  });
+
+  // WHY: the acceptance asks for THE REASON on stderr when the store cannot be
+  // reached, and the bare rejection from `fetch` is the words "fetch failed",
+  // which names neither the model nor the URL. Three of the four verbs embed
+  // before they can touch the store, so this is the error employees actually hit.
+  it("a store it cannot reach names the model and the url, not just 'fetch failed'", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "memory-verbs-dead-"));
+    const prev = { ...process.env };
+    process.env.BACKANT_MEMORY_DB = join(dir, "ns.db");
+    process.env.BACKANT_MEMORY_OLLAMA_URL = "http://127.0.0.1:9";
+    process.env.BACKANT_MEMORY_EMBEDDING_MODEL = "test-embed-model";
+    try {
+      const s = await openCliStore(process.cwd());
+      // A cue nothing has embedded before: embeddings are cached by text, so a
+      // reused one is answered from cache and never reaches the dead port.
+      const err = await runRecall(s, { cue: `never-embedded-${Date.now()}` }).catch((e) => e as Error);
+      expect(err).toBeInstanceOf(Error);
+      expect(err.message).toContain("embedding model unreachable");
+      expect(err.message).toContain("test-embed-model");
+      expect(err.message).toContain("http://127.0.0.1:9");
+    } finally {
+      process.env = prev;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("usage names every verb the CLI registers, so the surface is discoverable from the report", () => {
