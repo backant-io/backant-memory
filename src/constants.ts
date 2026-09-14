@@ -5,3 +5,7 @@ export const CONFIG_DIR = join(homedir(), ".backant-kairos");
 export const CREDENTIALS_FILE = join(CONFIG_DIR, "credentials.json");
 export const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 export const API_BASE_URL = "https://mcp.backant.io";
+
+/** The memory verbs the CLI exposes directly, without an MCP round trip. Named
+ *  here so `usage` reports them and `cli.ts` registers them from one list. */
+export const CLI_MEMORY_VERBS = ["recall", "reinforce", "write", "episode"] as const;

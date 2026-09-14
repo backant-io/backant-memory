@@ -1,3 +1,4 @@
+import { CLI_MEMORY_VERBS } from "./constants.js";
 import { createReadStream, readdirSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { homedir } from "node:os";
@@ -161,6 +162,7 @@ export function renderUsageReport(r: UsageReport, opts: { days?: number } = {}):
     for (const p of r.topProjects) out.push(`  ${p.sessions}\t${p.usedMemory}\t${p.project}`);
   }
   out.push("");
+  out.push(`CLI verbs (same store, no MCP round trip): ${CLI_MEMORY_VERBS.map((v) => `backant-memory ${v}`).join(", ")}`);
   out.push("Note: 'via ToolSearch' counts sessions that had to load the tools before using them (deferred MCP). `backant-memory install` sets alwaysLoad to remove that step.");
   return out.join("\n");
 }

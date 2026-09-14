@@ -87,6 +87,30 @@ Two profiles, one implementation:
 `memory_recall` returns `{hits, count, note?}` — an empty result carries a
 "no memories yet — write one" note instead of a bare `[]`.
 
+## CLI verbs
+
+For agents whose harness has no MCP surface, or that are told to use the CLI
+directly, four verbs reach the same repo-scoped store `serve` opens for stdio.
+The store is resolved from the git origin of the working directory, so run them
+from inside the checkout the memory belongs to. Each exits non-zero with the
+reason on stderr when the store cannot be reached.
+
+```bash
+backant-memory recall --cue "what you are about to re-derive" [--k 10] [--tier any|stm|ltm]
+backant-memory reinforce --id <id> [--reason act-cite]
+backant-memory write --tier stm|ltm --type <type> --content "<text>" --source <path_or_url> [--reason <why>]
+backant-memory episode --situation "<what you faced>" --action "<what you did>" \
+  --expected success|failure --outcome success|failure|partial [--evidence "<what shows it>"]
+```
+
+`recall` prints one JSON object per line with `id`, `tier`, `type`, `age` and
+`content`, so it pipes into `jq` without a wrapper. `write --tier ltm` requires
+`--reason`, the same rule `memory_write` enforces. `reinforce`'s `--reason` is a
+CATEGORY and not a note: `act-cite` (the default) and `dream-cite` raise
+`verdict_boost`, anything else only touches `last_reinforced`, and weight is
+capped at 1.0 so a freshly written row moves its citation counters rather than
+its number.
+
 ## Verify
 
 ```bash
