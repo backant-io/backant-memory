@@ -27,6 +27,11 @@ describe("renderPlist", () => {
     expect(p).toContain("<string>--http</string>");
     expect(p).toContain("<string>41414</string>");
     expect(p).toContain("/logs/stdout.log");
+    // Store reconnects (issue #8) leak fds until a gc; launchd's default soft
+    // limit is 256. The flag goes through the environment so ProgramArguments
+    // keeps the cli path in slot 1, which the ownership check relies on.
+    expect(p).toMatch(/<key>NODE_OPTIONS<\/key><string>--expose-gc<\/string>/);
+    expect(p).toMatch(/<key>NumberOfFiles<\/key><integer>4096<\/integer>/);
     expect(renderPlist({ nodePath: "/usr/local/bin/node", cliPath: "/g/dist/cli.js", port: 41414, logDir: "/logs" })).toBe(p);
   });
 });
@@ -56,6 +61,22 @@ describe("launchctl wrappers", () => {
     expect(calls.some(a => a[0] === "bootstrap")).toBe(true);
     expect(calls.some(a => a[0] === "kickstart")).toBe(true);
     expect(existsSync(join(dir, "io.backant.memory.plist"))).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("boots out the loaded job before bootstrap, so a rewritten plist takes effect", async () => {
+    // launchd keeps the definition it loaded: without the bootout, bootstrap
+    // returns 5 and kickstart restarts the old job, dropping new plist keys.
+    const dir = mkdtempSync(join(tmpdir(), "bam-launchd-"));
+    const calls: string[][] = [];
+    const exec = vi.fn(async (_c: string, args: string[]) => {
+      calls.push(args);
+      if (args[0] === "bootout") return { stdout: "Boot-out failed: 3: No such process", code: 3 };
+      return { stdout: "", code: 0 };
+    });
+    await installService({ exec, launchAgentsDir: dir, logDir: join(dir, "logs") });
+    expect(calls.map((a) => a[0])).toEqual(["bootout", "bootstrap", "kickstart"]);
+    expect(calls[0][1]).toMatch(/^gui\/\d+\/io\.backant\.memory$/);
     rmSync(dir, { recursive: true, force: true });
   });
 
