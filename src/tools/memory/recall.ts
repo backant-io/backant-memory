@@ -1,4 +1,4 @@
-import type { MemoryDb } from "../../memory/libsql-db.js";
+import { isBusyError, type MemoryDb } from "../../memory/libsql-db.js";
 import type { Embedder } from "../../ollama/embeddings.js";
 import { embeddingToJson } from "../../memory/embedding-util.js";
 import { cacheKey, readCache, writeCache, currentMemorySeq } from "../../memory/cache.js";
@@ -293,9 +293,13 @@ export async function recall(deps: RecallDeps): Promise<RecallHit[]> {
     process.stderr.write(
       `[recall-trace] trace write failed, recall unaffected: ${(err as Error).message}\n`
     );
-    try {
-      await deps.db.run(opsLog.sql, opsLog.args);
-    } catch { /* ops-log also unavailable — nothing more to do */ }
+    // Not after BUSY: the batch already retried on fresh connections, so an
+    // ops-log write now would only wait out the same lock again.
+    if (!isBusyError(err)) {
+      try {
+        await deps.db.run(opsLog.sql, opsLog.args);
+      } catch { /* ops-log also unavailable — nothing more to do */ }
+    }
   }
 
   return top;
