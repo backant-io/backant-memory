@@ -1,6 +1,8 @@
 import { createClient, type Client, type InArgs, type InValue } from "@libsql/client";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { runMigrations } from "./migrations.js";
 
 /**
@@ -32,6 +34,8 @@ export interface OpenOpts {
   syncIntervalSeconds?: number;
   /** Repo key (owner/repo) this connection is scoped to. Defaults to "". */
   repo?: string;
+  /** How long a statement waits for another process's lock. Defaults to 2000. */
+  busyTimeoutMs?: number;
 }
 
 /**
@@ -48,26 +52,32 @@ export function isBusyError(err: unknown): boolean {
 
 const BACKOFF_MS = [50, 100, 200, 400, 800];
 
+let gcFn: (() => void) | null | undefined;
 /**
- * busy_timeout on every connection; WAL once per file (it persists). Switching
- * to WAL needs no other connection in a write, so if it cannot switch now we
- * keep the current mode and try again on the next open or reconnect.
+ * The dropped connection's file descriptors stay open until V8 collects it
+ * (2 per reconnect in WAL), so every reconnect is followed by a gc. Uses
+ * global.gc under --expose-gc (the launchd service), otherwise exposes it at
+ * runtime so long-lived stdio servers are covered too.
  */
-async function applyPragmas(client: Client): Promise<void> {
-  await client.execute("PRAGMA busy_timeout=2000");
-  try {
-    await client.execute("PRAGMA journal_mode=WAL");
-  } catch {
-    // Busy: stay in the current mode. The failed statement is never reset, so
-    // this connection is dropped too (see isBusyError).
-    await client.reconnect();
-    await client.execute("PRAGMA busy_timeout=2000");
+function getGc(): (() => void) | null {
+  if (gcFn === undefined) {
+    if (typeof globalThis.gc === "function") gcFn = globalThis.gc as () => void;
+    else {
+      try {
+        setFlagsFromString("--expose-gc");
+        gcFn = runInNewContext("gc") as () => void;
+      } catch {
+        gcFn = null;
+      }
+    }
   }
+  return gcFn;
 }
 
 export async function openMemoryDb(opts: OpenOpts): Promise<MemoryDb> {
   mkdirSync(dirname(opts.localPath), { recursive: true });
 
+  const busyTimeout = `PRAGMA busy_timeout=${opts.busyTimeoutMs ?? 2000}`;
   const client = createClient({
     url: `file:${opts.localPath}`,
     ...(opts.syncUrl ? { syncUrl: opts.syncUrl, authToken: opts.authToken } : {}),
@@ -78,7 +88,25 @@ export async function openMemoryDb(opts: OpenOpts): Promise<MemoryDb> {
   // namespace with an empty local file.
   if (opts.syncUrl) await client.sync();
 
-  await applyPragmas(client);
+  // A new connection: the only way to clear a statement that failed with BUSY
+  // (see isBusyError). The gc waits one tick, or the old handle is still live.
+  async function freshConnection(): Promise<void> {
+    await client.reconnect();
+    await client.execute(busyTimeout);
+    await new Promise((r) => setImmediate(r));
+    getGc()?.();
+  }
+
+  await client.execute(busyTimeout);
+  // WAL persists in the file, so only open tries it. Switching needs no other
+  // connection in a write; if one is, keep the current mode and try again on
+  // the next open rather than fail it.
+  try {
+    await client.execute("PRAGMA journal_mode=WAL");
+  } catch (err) {
+    if (!isBusyError(err)) throw err;
+    await freshConnection();
+  }
 
   // Bring the store up to this engine's migration chain: pre-versioning stores
   // are normalized and stamped at baseline; newer stores are refused loudly
@@ -86,21 +114,19 @@ export async function openMemoryDb(opts: OpenOpts): Promise<MemoryDb> {
   await runMigrations(client);
   // The migration runner retries BUSY on this same connection, so it may hand
   // back one holding a stuck statement. Start the store on a clean one.
-  await client.reconnect();
-  await applyPragmas(client);
+  await freshConnection();
 
-  // On BUSY, drop the connection (the only way to clear the stuck statement),
-  // back off with jitter and retry; after the last retry surface the error.
-  // The reconnect happens before every throw too, so the connection is never
-  // left in a state where a later write reports ok without committing.
+  // On BUSY, drop the connection, back off with jitter and retry; after the
+  // last retry surface the error. Every BUSY gets a fresh connection, including
+  // the last: a retry on the connection a BUSY poisoned can report ok for a
+  // write that never commits, even in WAL with busy_timeout.
   async function withBusyRetry<T>(fn: () => Promise<T>): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       try {
         return await fn();
       } catch (err) {
         if (!isBusyError(err)) throw err;
-        await client.reconnect();
-        await applyPragmas(client);
+        await freshConnection();
         if (attempt >= BACKOFF_MS.length) throw err;
         await new Promise((r) => setTimeout(r, BACKOFF_MS[attempt] * (0.5 + Math.random())));
       }

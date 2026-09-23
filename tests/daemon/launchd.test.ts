@@ -27,6 +27,11 @@ describe("renderPlist", () => {
     expect(p).toContain("<string>--http</string>");
     expect(p).toContain("<string>41414</string>");
     expect(p).toContain("/logs/stdout.log");
+    // Store reconnects (issue #8) leak fds until a gc; launchd's default soft
+    // limit is 256. The flag goes through the environment so ProgramArguments
+    // keeps the cli path in slot 1, which the ownership check relies on.
+    expect(p).toMatch(/<key>NODE_OPTIONS<\/key><string>--expose-gc<\/string>/);
+    expect(p).toMatch(/<key>NumberOfFiles<\/key><integer>4096<\/integer>/);
     expect(renderPlist({ nodePath: "/usr/local/bin/node", cliPath: "/g/dist/cli.js", port: 41414, logDir: "/logs" })).toBe(p);
   });
 });

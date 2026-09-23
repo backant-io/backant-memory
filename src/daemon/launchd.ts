@@ -41,6 +41,14 @@ export function renderPlist(o: { nodePath: string; cliPath: string; port: number
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NODE_OPTIONS</key><string>--expose-gc</string>
+  </dict>
+  <key>SoftResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key><integer>4096</integer>
+  </dict>
   <key>StandardOutPath</key><string>${o.logDir}/stdout.log</string>
   <key>StandardErrorPath</key><string>${o.logDir}/stderr.log</string>
 </dict>
