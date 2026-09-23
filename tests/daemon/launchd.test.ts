@@ -64,6 +64,22 @@ describe("launchctl wrappers", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it("boots out the loaded job before bootstrap, so a rewritten plist takes effect", async () => {
+    // launchd keeps the definition it loaded: without the bootout, bootstrap
+    // returns 5 and kickstart restarts the old job, dropping new plist keys.
+    const dir = mkdtempSync(join(tmpdir(), "bam-launchd-"));
+    const calls: string[][] = [];
+    const exec = vi.fn(async (_c: string, args: string[]) => {
+      calls.push(args);
+      if (args[0] === "bootout") return { stdout: "Boot-out failed: 3: No such process", code: 3 };
+      return { stdout: "", code: 0 };
+    });
+    await installService({ exec, launchAgentsDir: dir, logDir: join(dir, "logs") });
+    expect(calls.map((a) => a[0])).toEqual(["bootout", "bootstrap", "kickstart"]);
+    expect(calls[0][1]).toMatch(/^gui\/\d+\/io\.backant\.memory$/);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it("throws when bootstrap fails with a real error code (not 0 or 5)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "bam-launchd-"));
     const exec = vi.fn(async (_c: string, args: string[]) =>

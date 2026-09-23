@@ -137,6 +137,23 @@ describe("store under cross-process write contention (issue #8)", () => {
     await db.close();
   }, 30_000);
 
+  it("an operation that meets BUSY twice never reports ok for a write that is not on disk", async () => {
+    // A second BUSY poisons the fresh connection too; a retry on it reports ok
+    // for an insert that never commits. Every BUSY needs its own reconnect.
+    const path = freshPath();
+    const db = await openMemoryDb({ localPath: path, busyTimeoutMs: 500 });
+    const h = await holdLock(path, 1500);
+    const ok: string[] = [];
+    try {
+      await db.run(opsRow("twice").sql, opsRow("twice").args);
+      ok.push("twice");
+    } catch { /* surfaced BUSY is allowed */ }
+    await exited(h);
+    expect(await onDisk(path, "twice")).toEqual(ok);
+    expect(ok).toEqual(["twice"]);
+    await db.close();
+  }, 30_000);
+
   it("surfaces BUSY after the retries run out, and the connection still works", async () => {
     const path = freshPath();
     const db = await openMemoryDb({ localPath: path });

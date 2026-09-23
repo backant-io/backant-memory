@@ -146,6 +146,10 @@ export async function installService(
   // under npm postinstall it is dist/postinstall.js — both wrong for the plist.
   const cliPath = opts.cliPath ?? process.argv[1];
   writeFileSync(plist, renderPlist({ nodePath: process.execPath, cliPath, port, logDir: ld }));
+  // launchd keeps the definition it loaded: bootstrap on a loaded job returns 5
+  // and kickstart restarts the old one, so plist changes never take effect.
+  // Boot it out first; "not loaded" is fine.
+  await exec("launchctl", ["bootout", `gui/${uid()}/${SERVICE_LABEL}`]);
   // Acceptable bootstrap codes: 0 (loaded) and 5 (already bootstrapped). Anything
   // else is a real failure — surface it instead of reporting a false success.
   const boot = await exec("launchctl", ["bootstrap", `gui/${uid()}`, plist]);
