@@ -80,7 +80,7 @@ describe("upsertSessionSummary", () => {
     const fts = await db.all<{ content: string }>("SELECT content FROM memory_fts");
     expect(fts.length).toBe(1);
     expect(fts[0].content).toBe("second version");
-    const latest = await readLatestSessionSummary(db);
+    const latest = await readLatestSessionSummary(db, undefined, () => new Date("2026-08-18T12:00:00Z"));
     expect(latest?.content).toBe("second version");
     await db.close();
   });
